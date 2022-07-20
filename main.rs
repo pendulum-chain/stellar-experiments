@@ -7,7 +7,8 @@ use stellar::types::{Curve25519Public, AuthCert, Hello, Auth, Signature, Uint256
 use substrate_stellar_sdk as stellar;
 
 fn main() -> std::io::Result<()> {
-    let addr = "139.59.221.81:11625"; //LOBSTR 4 (Asia)
+    //let addr = "139.59.221.81:11625"; //LOBSTR 4 (Asia)
+    let addr = "54.173.54.200:11625"; // SDF 1
     let mut stream = TcpStream::connect(addr)?;
     
     let secret = stellar::SecretKey::from_binary([0; 32]);
@@ -29,6 +30,12 @@ fn main() -> std::io::Result<()> {
         }, 
         nonce: [0;32], 
     };
+
+    //force error by sending unexpected xdr
+    // let buf = XdrCodec::to_xdr(&StellarMessage::Hello(hello));
+    // stream.write(&buf)?;
+
+    //send hello message
     let authenticated_message = AuthenticatedMessage::V0(AuthenticatedMessageV0 { 
         sequence: 0, 
         message: StellarMessage::Hello(hello.clone()), 
@@ -36,22 +43,22 @@ fn main() -> std::io::Result<()> {
             mac: [0;32],
         }
     });
-
-    //let buf = XdrCodec::to_xdr(&StellarMessage::Hello(hello));
     let buf = XdrCodec::to_xdr(&authenticated_message);
     stream.write(&buf)?;
+
+
 
     //request a message
-    let sendmore = SendMore{num_messages: 1 };
-    let authenticated_message = AuthenticatedMessage::V0(AuthenticatedMessageV0 { 
-        sequence: 0, 
-        message: StellarMessage::SendMore(sendmore.clone()), 
-        mac: HmacSha256Mac{
-            mac: [0;32],
-        }
-    });
-    let buf = XdrCodec::to_xdr(&authenticated_message);
-    stream.write(&buf)?;
+    // let sendmore = SendMore{num_messages: 1 };
+    // let authenticated_message = AuthenticatedMessage::V0(AuthenticatedMessageV0 { 
+    //     sequence: 0, 
+    //     message: StellarMessage::SendMore(sendmore.clone()), 
+    //     mac: HmacSha256Mac{
+    //         mac: [0;32],
+    //     }
+    // });
+    // let buf = XdrCodec::to_xdr(&authenticated_message);
+    // stream.write(&buf)?;
     
     //read loop
     let mut readbuf = [0; 128];
