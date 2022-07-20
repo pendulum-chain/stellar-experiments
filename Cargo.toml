@@ -1,0 +1,16 @@
+[package]
+name = "stellar-relay"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+# substrate-stellar-sdk = {git = "https://github.com/pendulum-chain/substrate-stellar-sdk", branch = "polkadot-v0.9.18", default-features = false, features = ['offchain']}
+substrate-stellar-sdk = {path = "../substrate-stellar-sdk", default-features = false, features = ['all-types']}
+
+[features]
+default = ["std"]
+std = [
+  "substrate-stellar-sdk/std",
+]
