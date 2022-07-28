@@ -1,5 +1,3 @@
-// NOT YET WORKING
-
 use std::collections::HashMap;
 use substrate_stellar_sdk::{Curve25519Secret, PublicKey, SecretKey, XdrCodec};
 use substrate_stellar_sdk::types::{AuthCert, Curve25519Public, HmacSha256Mac, Signature, Uint256};
@@ -34,25 +32,18 @@ impl ConnectionAuth {
 fn create_auth_cert(time_now: u64, network_id_xdr: &mut Vec<u8>, pub_key: &PublicKey, secret:&SecretKey) -> AuthCert {
     let auth_expiration_limit:u64 = 3600;
     let expiration = time_now + auth_expiration_limit;
-    let mut expiration_xdr = expiration.to_xdr();
 
-
-
-    let mut pub_key_xdr = pub_key.to_xdr();
     let mut buf:Vec<u8> = vec![];
+
     buf.append(network_id_xdr);
     buf.append(&mut env_type_auth());
-    buf.append(&mut expiration_xdr);
-    buf.append(&mut pub_key_xdr);
+    buf.append(&mut expiration.to_xdr());
+    buf.append(&mut pub_key.to_xdr());
 
-    let sig = secret.create_signature(buf).to_vec();
-    println!("THE SIG: {:?}", sig);
-    let signature:Signature = Signature::new(sig).unwrap();
-
-    let pubkey = Curve25519Public{key: pub_key.clone().into_binary()};
+    let signature:Signature = Signature::new(secret.create_signature(buf).to_vec()).unwrap();
 
     AuthCert{
-        pubkey,
+        pubkey: Curve25519Public{key: pub_key.clone().into_binary()},
         expiration,
         sig: signature
     }
@@ -60,23 +51,20 @@ fn create_auth_cert(time_now: u64, network_id_xdr: &mut Vec<u8>, pub_key: &Publi
 
 fn verify_remote_auth_cert(time_in_secs:u64, remote_pub_key:&PublicKey, auth_cert: &AuthCert, network_id_xdr: &mut Vec<u8>) -> bool {
     let expiration = auth_cert.expiration;
-    if expiration <= (time_in_secs / 1000) {
-        println!("expired!");
+    if expiration <= (time_in_secs / 1000) { // not really sure of the 1000
         return false;
     }
 
     let mut raw_data: Vec<u8> = vec![];
-
+    raw_data.append(network_id_xdr);
     raw_data.append(&mut env_type_auth());
     raw_data.append(&mut auth_cert.expiration.to_xdr());
-    raw_data.append(&mut auth_cert.pubkey.to_xdr());
 
-    let raw_sig:Vec<u8>= auth_cert.sig.get_vec().clone(); //.try_into().unwrap();
+    let pubkey =  PublicKey::from_binary(auth_cert.pubkey.key);
+    raw_data.append(&mut pubkey.to_xdr());
 
-    let x:[u8;64] = raw_sig.try_into().unwrap();
-
-    // aaaaaaah, why
-    remote_pub_key.verify_signature(raw_data,&x)
+    let raw_sig:[u8;64]= auth_cert.sig.get_vec().clone().try_into().unwrap();
+    remote_pub_key.verify_signature(raw_data,&raw_sig)
 }
 
 fn create_sending_mac_key(local_nonce:Uint256, remote_nonce:Uint256, remote_pub_key:Curve25519Public, we_called_remote:bool ) {
@@ -94,7 +82,6 @@ fn create_sending_mac_key(local_nonce:Uint256, remote_nonce:Uint256, remote_pub_
     buf.append(&mut local_n);
     buf.append(&mut remote_n);
     buf.append(&mut vec![1]);
-
 }
 
 #[cfg(test)]
@@ -122,6 +109,7 @@ mod test {
             &secret
         );
 
+        let mut network_id_xdr = public_network.get_id().to_xdr();
         assert!(
             verify_remote_auth_cert(
                 time_now,
