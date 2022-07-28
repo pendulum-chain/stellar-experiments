@@ -1,5 +1,8 @@
 use std::collections::HashMap;
 use rand::Rng;
+use hmac::{Hmac, Mac};
+use sha2::Sha256;
+
 use substrate_stellar_sdk::{Curve25519Secret, PublicKey, SecretKey, XdrCodec};
 use substrate_stellar_sdk::network::Network;
 use substrate_stellar_sdk::types::{AuthCert, Curve25519Public, HmacSha256Mac, Signature, Uint256};
@@ -53,9 +56,8 @@ impl ConnectionAuth {
 
             let remote_pub_key_bin = remote_pub_key.as_binary();
             tweetnacl::scalarmult(&mut buf, &self.secret_key_ecdh.key, remote_pub_key_bin);
+
             buffer.extend_from_slice(&buf);
-
-
             if we_called_remote {
                 buffer.extend_from_slice(&self.public_key_ecdh.key);
                 buffer.extend_from_slice(remote_pub_key_bin);
@@ -64,10 +66,13 @@ impl ConnectionAuth {
                 buffer.extend_from_slice(&self.public_key_ecdh.key);
             }
 
+            type HmacSha256 = Hmac<Sha256>;
+            let mut hmac = HmacSha256::new_from_slice(&[0;32]).unwrap();
+            hmac.update(&buffer);
+            let hmac = hmac.finalize().into_bytes().to_vec();
 
-            let hmac = hmac_sha256::HMAC::new(buffer);
             HmacSha256Mac{
-                mac: hmac.finalize()
+                mac: hmac.try_into().unwrap()
             }
         })
     }

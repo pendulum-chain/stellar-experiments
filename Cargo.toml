@@ -7,8 +7,6 @@ edition = "2021"
 
 [dependencies]
 rand = "0.8.5"
-hmac-sha256 = "1.1.4"
-libsodium-sys = "0.2.7"
 tweetnacl = "0.4.0"
 
 hmac = "0.12.1"
