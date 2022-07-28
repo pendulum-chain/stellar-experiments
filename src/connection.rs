@@ -1,7 +1,8 @@
 use std::collections::HashMap;
+use rand::Rng;
 use substrate_stellar_sdk::{Curve25519Secret, PublicKey, SecretKey, XdrCodec};
+use substrate_stellar_sdk::network::Network;
 use substrate_stellar_sdk::types::{AuthCert, Curve25519Public, HmacSha256Mac, Signature, Uint256};
-use tweetnacl;
 
 const crypto_scalarmult_BYTES:usize = 32; // https://docs.rs/libsodium-sys/latest/libsodium_sys/constant.crypto_scalarmult_BYTES.html
 fn env_type_auth() -> Vec<u8> {
@@ -9,25 +10,66 @@ fn env_type_auth() -> Vec<u8> {
 }
 
 pub struct ConnectionAuth {
-    secret: Curve25519Secret,
+    keypair: SecretKey,
+    secret_key_ecdh: Curve25519Secret,
+    public_key_ecdh: Curve25519Public,
+    network: Network,
     we_called_remote_shared_keys: HashMap<[u8; 32],HmacSha256Mac>,
     remote_called_us_shared_keys: HashMap<[u8; 32],HmacSha256Mac>
 }
 
 impl ConnectionAuth {
-    fn get_shared_key(&self, remote_pub_key:&Curve25519Public, secret_key:SecretKey, we_called_remote:bool) {
-        let we_called = &self.we_called_remote_shared_keys.get(&remote_pub_key.key);
-        let remote_called = &self.remote_called_us_shared_keys.get(&remote_pub_key.key);
-        let shared_key = if we_called_remote {
+
+    fn new(network:Network, keypair:SecretKey) -> ConnectionAuth {
+        let secret_key = rand::thread_rng().gen::<[u8; 32]>();
+        let mut pub_key:[u8;32] = [0;32];
+        tweetnacl::scalarmult_base(&mut pub_key,&secret_key);
+
+        ConnectionAuth {
+            keypair,
+            secret_key_ecdh: Curve25519Secret {
+                key: secret_key
+            },
+            public_key_ecdh: Curve25519Public { key: pub_key },
+            network,
+            we_called_remote_shared_keys: HashMap::new(),
+            remote_called_us_shared_keys: HashMap::new()
+        }
+    }
+
+    fn get_shared_key(&self, remote_pub_key:PublicKey, we_called_remote:bool) -> HmacSha256Mac {
+        let we_called = &self.we_called_remote_shared_keys.get(remote_pub_key.as_binary());
+        let remote_called = &self.remote_called_us_shared_keys.get(remote_pub_key.as_binary());
+
+        let shared_key_opt = if we_called_remote {
             we_called
         } else {
             remote_called
         };
-    
-        let mut buffer = [0; 32];
-        if shared_key.is_none() {
-            tweetnacl::scalarmult(&mut buffer, secret_key.as_binary(), &remote_pub_key.key);
-        }
+
+        shared_key_opt.cloned().unwrap_or_else(|| {
+            let mut buffer:Vec<u8> = vec![];
+            let mut buf:[u8;32] = [0;32];
+
+            let remote_pub_key_bin = remote_pub_key.as_binary();
+            tweetnacl::scalarmult(&mut buf, &self.secret_key_ecdh.key, remote_pub_key_bin);
+            buffer.extend_from_slice(&buf);
+
+
+            if we_called_remote {
+                buffer.extend_from_slice(&self.public_key_ecdh.key);
+                buffer.extend_from_slice(remote_pub_key_bin);
+            } else {
+                buffer.extend_from_slice(remote_pub_key_bin);
+                buffer.extend_from_slice(&self.public_key_ecdh.key);
+            }
+
+
+            let hmac = hmac_sha256::HMAC::new(buffer);
+            HmacSha256Mac{
+                mac: hmac.finalize()
+            }
+        })
     }
 
 }
@@ -93,14 +135,15 @@ mod test {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use substrate_stellar_sdk::network::Network;
-    use substrate_stellar_sdk::{SecretKey, XdrCodec};
-    use crate::connection::{create_auth_cert, verify_remote_auth_cert};
+    use substrate_stellar_sdk::{PublicKey, SecretKey, XdrCodec};
+    use substrate_stellar_sdk::types::Curve25519Public;
+    use crate::connection::{ConnectionAuth, create_auth_cert, verify_remote_auth_cert};
 
     #[test]
     fn create_valid_auth_cert() {
         let secret = SecretKey::from_encoding("SCV6Q3VU4S52KVNJOFXWTHFUPHUKVYK3UV2ISGRLIUH54UGC6OPZVK2D").expect("should be okay");
         let pub_key = secret.get_public();
-        let public_network = substrate_stellar_sdk::network::Network::new(b"Public Global Stellar Network ; September 2015");
+        let public_network = Network::new(b"Public Global Stellar Network ; September 2015");
 
         let time_now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
 
@@ -121,5 +164,19 @@ mod test {
                 &mut network_id_xdr
             )
         );
+    }
+
+    #[test]
+    fn create_valid_shared_key() {
+        let public_network = Network::new(b"Public Global Stellar Network ; September 2015");
+        let secret = SecretKey::from_encoding("SCV6Q3VU4S52KVNJOFXWTHFUPHUKVYK3UV2ISGRLIUH54UGC6OPZVK2D").expect("should work");
+
+        let auth = ConnectionAuth::new(public_network, secret);
+
+        let bytes = base64::decode_config("SaINZpCTl6KO8xMLvDkE2vE3knQz0Ma1RmJySOFqsWk=", base64::STANDARD).unwrap();
+        let remote_pub_key = PublicKey::from_binary(bytes.try_into().unwrap());
+
+        let shared_key = auth.get_shared_key(remote_pub_key, true);
+
     }
 }

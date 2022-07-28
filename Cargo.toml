@@ -6,8 +6,16 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-substrate-stellar-sdk = {git = "https://github.com/pendulum-chain/substrate-stellar-sdk", branch = "master", default-features = false, features = ['all-types']}
-# substrate-stellar-sdk = {path = "../substrate-stellar-sdk", default-features = false, features = ['all-types']}
+rand = "0.8.5"
+hmac-sha256 = "1.1.4"
+libsodium-sys = "0.2.7"
+tweetnacl = "0.4.0"
+
 hmac = "0.12.1"
 sha2 = "0.10.2"
-tweetnacl = "0.4.0"
+
+substrate-stellar-sdk = {git = "https://github.com/pendulum-chain/substrate-stellar-sdk", branch = "master", default-features = false, features = ['all-types']}
+# substrate-stellar-sdk = {path = "../substrate-stellar-sdk", default-features = false, features = ['all-types']}
+
+[dev-dependencies]
+base64 = "0.13.0"
