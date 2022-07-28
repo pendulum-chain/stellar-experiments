@@ -5,30 +5,54 @@ use stellar::{PublicKey, XdrCodec, Curve25519Secret};
 use stellar::compound_types::LimitedString;
 use stellar::types::{Curve25519Public, AuthCert, Hello, Auth, Signature, Uint256, StellarMessage, Error, AuthenticatedMessage, AuthenticatedMessageV0, HmacSha256Mac, SendMore};
 use substrate_stellar_sdk as stellar;
+use sha2::Sha256;
+use hmac::{Hmac, Mac};
+
+// Create alias for HMAC-SHA256
+type HmacSha256 = Hmac<Sha256>;
 
 fn main() -> std::io::Result<()> {
-    let addr = "139.59.221.81:11625"; //LOBSTR 4 (Asia)
+    let addr = "54.173.54.200:11625"; // SDF 1
+    //let addr = "45.55.99.75:11625"; //LOBSTR 4 (Asia)
     let mut stream = TcpStream::connect(addr)?;
-    
-    let secret = stellar::SecretKey::from_binary([0; 32]);
+
+    let secret = stellar::SecretKey::from_encoding("SAJLF4VGRLROS3NIVBGBRXG5UW3ELAEVOOIFR33A6KDYFBN5CNIHTYMO").unwrap();
     let public = secret.get_public();
+    println!("peer id: {:?}", String::from_utf8_lossy(&public.to_encoding()));
+    // let peer_id = PublicKey::from_encoding("GBEWOOLXJVJGSG5RHHWKOHCFO2X4GFLDSEKMRN6DOM57ED2AAGOVSHTE").unwrap();
 
     //hello handshake
     let hello = Hello{ 
-        ledger_version: 17, 
-        overlay_version: 17, 
-        overlay_min_version: 16, 
+        ledger_version: 19,
+        overlay_version: 22,
+        overlay_min_version: 21,
         network_id: *stellar::network::TEST_NETWORK.get_id(), 
-        version_str: LimitedString::<100>::new("v15.0.0".as_bytes().to_vec()).unwrap(), 
+        version_str: LimitedString::<100>::new("v15.0.0".as_bytes().to_vec()).unwrap(),
         listening_port: 11625, 
         peer_id: public.clone(),
         cert: AuthCert{ 
-            pubkey: Curve25519Public{key: public.clone().into_binary()}, 
+            pubkey: Curve25519Public{key: public.clone().into_binary()},
             expiration: 0,
             sig: Signature::new(secret.create_signature([0;32]).to_vec()).unwrap(),
         }, 
         nonce: [0;32], 
     };
+
+    //force error by sending unexpected xdr
+    // let buf = XdrCodec::to_xdr(&StellarMessage::Hello(hello.clone()));
+    // stream.write(&buf)?;
+
+    //calculate hmac
+    let mut mac = HmacSha256::new_from_slice(b"my secret and secure key")
+        .expect("HMAC can take key of any size");
+    //TODO: concat: localsequence, message 
+    mac.update(&StellarMessage::Hello(hello.clone()).to_xdr()); //input message
+    let result = mac.finalize();
+    let code_bytes = result.into_bytes();
+    
+
+    //send hello message
+
     let authenticated_message = AuthenticatedMessage::V0(AuthenticatedMessageV0 { 
         sequence: 0, 
         message: StellarMessage::Hello(hello.clone()), 
@@ -36,22 +60,22 @@ fn main() -> std::io::Result<()> {
             mac: [0;32],
         }
     });
-
-    //let buf = XdrCodec::to_xdr(&StellarMessage::Hello(hello));
     let buf = XdrCodec::to_xdr(&authenticated_message);
     stream.write(&buf)?;
+
+
 
     //request a message
-    let sendmore = SendMore{num_messages: 1 };
-    let authenticated_message = AuthenticatedMessage::V0(AuthenticatedMessageV0 { 
-        sequence: 0, 
-        message: StellarMessage::SendMore(sendmore.clone()), 
-        mac: HmacSha256Mac{
-            mac: [0;32],
-        }
-    });
-    let buf = XdrCodec::to_xdr(&authenticated_message);
-    stream.write(&buf)?;
+    // let sendmore = SendMore{num_messages: 10 };
+    // let authenticated_message = AuthenticatedMessage::V0(AuthenticatedMessageV0 { 
+    //     sequence: 0, 
+    //     message: StellarMessage::SendMore(sendmore.clone()), 
+    //     mac: HmacSha256Mac{
+    //         mac: [0;32],
+    //     }
+    // });
+    // let buf = XdrCodec::to_xdr(&authenticated_message);
+    // stream.write(&buf)?;
     
     //read loop
     let mut readbuf = [0; 128];
