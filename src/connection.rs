@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use substrate_stellar_sdk::{Curve25519Secret, PublicKey, SecretKey, XdrCodec};
 use substrate_stellar_sdk::types::{AuthCert, Curve25519Public, HmacSha256Mac, Signature, Uint256};
+use tweetnacl;
 
 const crypto_scalarmult_BYTES:usize = 32; // https://docs.rs/libsodium-sys/latest/libsodium_sys/constant.crypto_scalarmult_BYTES.html
 fn env_type_auth() -> Vec<u8> {
@@ -9,23 +10,25 @@ fn env_type_auth() -> Vec<u8> {
 
 pub struct ConnectionAuth {
     secret: Curve25519Secret,
-    we_called_remote_shared_keys: HashMap<Curve25519Public,HmacSha256Mac>,
-    remote_called_us_shared_keys: HashMap<Curve25519Public,HmacSha256Mac>
+    we_called_remote_shared_keys: HashMap<[u8; 32],HmacSha256Mac>,
+    remote_called_us_shared_keys: HashMap<[u8; 32],HmacSha256Mac>
 }
 
 impl ConnectionAuth {
-    // fn get_shared_key(&self, remote_pub_key:&Curve25519Public, secret_key:SecretKey, we_called_remote:bool) {
-    //     let shared_key = if we_called_remote {
-    //         &self.we_called_remote_shared_keys.get(remote_pub_key)
-    //     } else {
-    //         &self.remote_called_us_shared_keys.get(remote_pub_key)
-    //     };
-    //
-    //     let mut buffer:Vec<u8> = vec![];
-    //     if shared_key.is_none() {
-    //         libsodium_sys::crypto_scalarmult(buffer,secret_key,remote_pub_key);
-    //     }
-    // }
+    fn get_shared_key(&self, remote_pub_key:&Curve25519Public, secret_key:SecretKey, we_called_remote:bool) {
+        let we_called = &self.we_called_remote_shared_keys.get(&remote_pub_key.key);
+        let remote_called = &self.remote_called_us_shared_keys.get(&remote_pub_key.key);
+        let shared_key = if we_called_remote {
+            we_called
+        } else {
+            remote_called
+        };
+    
+        let mut buffer = [0; 32];
+        if shared_key.is_none() {
+            tweetnacl::scalarmult(&mut buffer, secret_key.as_binary(), &remote_pub_key.key);
+        }
+    }
 
 }
 
