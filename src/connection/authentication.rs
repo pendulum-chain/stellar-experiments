@@ -3,6 +3,7 @@ use rand::Rng;
 use sha2::Sha256;
 use std::collections::HashMap;
 
+use crate::connection::Error;
 use substrate_stellar_sdk::network::Network;
 use substrate_stellar_sdk::types::{AuthCert, Curve25519Public, HmacSha256Mac, Signature, Uint256};
 use substrate_stellar_sdk::{Curve25519Secret, PublicKey, SecretKey, XdrCodec};
@@ -13,7 +14,7 @@ fn env_type_auth() -> Vec<u8> {
     b"envelopeTypeAuth".to_xdr()
 }
 
-pub const AUTH_CERT_EXPIRATION_LIMIT:u64 = 3600; // 60 minutes
+pub const AUTH_CERT_EXPIRATION_LIMIT: u64 = 3600; // 60 minutes
 
 pub struct ConnectionAuth {
     keypair: SecretKey,
@@ -23,11 +24,11 @@ pub struct ConnectionAuth {
     we_called_remote_shared_keys: HashMap<[u8; 32], HmacSha256Mac>,
     remote_called_us_shared_keys: HashMap<[u8; 32], HmacSha256Mac>,
     auth_cert: Option<AuthCert>,
-    auth_cert_expiration: u64
+    auth_cert_expiration: u64,
 }
 
 impl ConnectionAuth {
-    fn new(network: Network, keypair: SecretKey, auth_cert_expiration:u64) -> ConnectionAuth {
+    fn new(network: Network, keypair: SecretKey, auth_cert_expiration: u64) -> ConnectionAuth {
         let secret_key = rand::thread_rng().gen::<Buffer>();
         let mut pub_key: Buffer = [0; 32];
         tweetnacl::scalarmult_base(&mut pub_key, &secret_key);
@@ -40,7 +41,7 @@ impl ConnectionAuth {
             we_called_remote_shared_keys: HashMap::new(),
             remote_called_us_shared_keys: HashMap::new(),
             auth_cert: None,
-            auth_cert_expiration
+            auth_cert_expiration,
         }
     }
 
@@ -106,25 +107,27 @@ impl ConnectionAuth {
     ///
     /// # Arguments
     /// * `valid_at` - the validity start date in seconds.
-    pub fn auth_cert(&self, valid_at:u64) -> Option<&AuthCert> {
-        self.auth_cert.as_ref().and_then(|auth_cert| {
-            if self.auth_cert_expiration < (valid_at + AUTH_CERT_EXPIRATION_LIMIT / 2) {
-                None
-            } else {
-                Some(auth_cert)
+    pub fn auth_cert(&self, valid_at: u64) -> Result<&AuthCert, Error> {
+        match self.auth_cert.as_ref() {
+            None => Err(Error::AuthCertNotFound),
+            Some(auth_cert) => {
+                if self.auth_cert_expiration < (valid_at + AUTH_CERT_EXPIRATION_LIMIT / 2) {
+                    return Err(Error::AuthCertExpired);
+                }
+                Ok(auth_cert)
             }
-        })
+        }
     }
 
-    pub fn generate_and_save_auth_cert(&mut self, valid_at:u64) -> AuthCert {
+    pub fn generate_and_save_auth_cert(&mut self, valid_at: u64) -> AuthCert {
         let mut network_id_xdr = self.network.get_id().to_xdr();
-        self.auth_cert_expiration = valid_at  + AUTH_CERT_EXPIRATION_LIMIT;
+        self.auth_cert_expiration = valid_at + AUTH_CERT_EXPIRATION_LIMIT;
 
         let auth_cert = create_auth_cert(
             self.auth_cert_expiration,
             &mut network_id_xdr,
             self.pub_key_ecdh.clone(),
-            &self.keypair
+            &self.keypair,
         );
 
         self.auth_cert = Some(auth_cert.clone());
@@ -214,11 +217,14 @@ fn create_sending_mac_key(
 #[cfg(test)]
 mod test {
 
+    use crate::connection::authentication::{
+        create_auth_cert, verify_remote_auth_cert, ConnectionAuth, AUTH_CERT_EXPIRATION_LIMIT,
+    };
+    use crate::connection::Error;
     use std::time::{SystemTime, UNIX_EPOCH};
     use substrate_stellar_sdk::network::Network;
     use substrate_stellar_sdk::types::Curve25519Public;
     use substrate_stellar_sdk::{PublicKey, SecretKey, XdrCodec};
-    use crate::connection::authentication::{ConnectionAuth, create_auth_cert, verify_remote_auth_cert};
 
     fn mock_connection_auth() -> ConnectionAuth {
         let public_network = Network::new(b"Public Global Stellar Network ; September 2015");
@@ -226,7 +232,7 @@ mod test {
             SecretKey::from_encoding("SCV6Q3VU4S52KVNJOFXWTHFUPHUKVYK3UV2ISGRLIUH54UGC6OPZVK2D")
                 .expect("should work");
 
-        ConnectionAuth::new(public_network, secret,0)
+        ConnectionAuth::new(public_network, secret, 0)
     }
 
     #[test]
@@ -251,28 +257,47 @@ mod test {
     }
 
     #[test]
+    fn expired_auth_cert() {
+        let mut auth = mock_connection_auth();
+
+        let time_now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        assert_eq!(auth.auth_cert(time_now), Err(Error::AuthCertNotFound));
+
+        let new_auth = auth.generate_and_save_auth_cert(time_now);
+        let auth_inside_valid_range = auth
+            .auth_cert(time_now + 1)
+            .expect("should return an auth cert");
+        assert_eq!(&new_auth, auth_inside_valid_range);
+
+        // expired
+        let new_time = time_now + (AUTH_CERT_EXPIRATION_LIMIT / 2) + 100;
+        assert_eq!(auth.auth_cert(new_time), Err(Error::AuthCertExpired));
+    }
+
+    #[test]
     fn create_valid_shared_key() {
         let public_network = Network::new(b"Public Global Stellar Network ; September 2015");
         let secret =
             SecretKey::from_encoding("SCV6Q3VU4S52KVNJOFXWTHFUPHUKVYK3UV2ISGRLIUH54UGC6OPZVK2D")
                 .expect("should work");
 
-        let mut auth = ConnectionAuth::new(public_network, secret,0);
+        let mut auth = ConnectionAuth::new(public_network, secret, 0);
 
         let bytes = base64::decode_config(
             "SaINZpCTl6KO8xMLvDkE2vE3knQz0Ma1RmJySOFqsWk=",
             base64::STANDARD,
         )
-            .unwrap();
+        .unwrap();
         let remote_pub_key = PublicKey::from_binary(bytes.try_into().unwrap());
 
         assert!(auth.shared_key(&remote_pub_key, true).is_none());
 
         let shared_key = auth.generate_and_save_shared_key(&remote_pub_key, true);
 
-        assert_eq!(
-            auth.shared_key(&remote_pub_key, true),
-            Some(&shared_key)
-        );
+        assert_eq!(auth.shared_key(&remote_pub_key, true), Some(&shared_key));
     }
 }
