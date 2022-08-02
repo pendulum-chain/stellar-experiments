@@ -1,12 +1,14 @@
+#![allow(dead_code)] //todo: remove after being tested and implemented
+
 use hmac::{Hmac, Mac};
 use rand::Rng;
 use sha2::Sha256;
 use std::collections::HashMap;
 
-use crate::connection::Error;
 use substrate_stellar_sdk::network::Network;
 use substrate_stellar_sdk::types::{AuthCert, Curve25519Public, HmacSha256Mac, Signature, Uint256};
 use substrate_stellar_sdk::{Curve25519Secret, PublicKey, SecretKey, XdrCodec};
+use crate::connection::Error;
 
 type Buffer = [u8; 32];
 
@@ -28,7 +30,7 @@ pub struct ConnectionAuth {
 }
 
 impl ConnectionAuth {
-    fn new(network: Network, keypair: SecretKey, auth_cert_expiration: u64) -> ConnectionAuth {
+    pub fn new(network: Network, keypair: SecretKey, auth_cert_expiration: u64) -> ConnectionAuth {
         let secret_key = rand::thread_rng().gen::<Buffer>();
         let mut pub_key: Buffer = [0; 32];
         tweetnacl::scalarmult_base(&mut pub_key, &secret_key);
@@ -43,6 +45,10 @@ impl ConnectionAuth {
             auth_cert: None,
             auth_cert_expiration,
         }
+    }
+
+    pub(crate) fn keypair(&self) -> &SecretKey {
+        &self.keypair
     }
 
     pub fn pub_key_ecdh(&self) -> &Curve25519Public {
@@ -220,11 +226,11 @@ mod test {
     use crate::connection::authentication::{
         create_auth_cert, verify_remote_auth_cert, ConnectionAuth, AUTH_CERT_EXPIRATION_LIMIT,
     };
-    use crate::connection::Error;
     use std::time::{SystemTime, UNIX_EPOCH};
     use substrate_stellar_sdk::network::Network;
     use substrate_stellar_sdk::types::Curve25519Public;
     use substrate_stellar_sdk::{PublicKey, SecretKey, XdrCodec};
+    use crate::connection::Error;
 
     fn mock_connection_auth() -> ConnectionAuth {
         let public_network = Network::new(b"Public Global Stellar Network ; September 2015");
