@@ -1,4 +1,9 @@
 mod connection;
+pub mod node;
+pub mod converter;
+
+
+pub use connection::*;
 
 use std::io::prelude::*;
 use std::net::TcpStream;

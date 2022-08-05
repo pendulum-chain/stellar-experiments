@@ -55,6 +55,10 @@ impl ConnectionAuth {
         &self.pub_key_ecdh
     }
 
+    pub fn network_id(&self) -> &[u8; 32] {
+        self.network.get_id()
+    }
+
     /// Gets an existing shared key.
     /// Returns `none` when not found.
     pub fn shared_key(
@@ -175,11 +179,11 @@ fn create_auth_cert(
     }
 }
 
-fn verify_remote_auth_cert(
+pub fn verify_remote_auth_cert(
     time_in_secs: u64,
     remote_pub_key: &PublicKey,
     auth_cert: &AuthCert,
-    network_id_xdr: &mut Vec<u8>,
+    network_id_xdr: &mut [u8],
 ) -> bool {
     let expiration = auth_cert.expiration;
     if expiration <= (time_in_secs / 1000) {
@@ -188,7 +192,7 @@ fn verify_remote_auth_cert(
     }
 
     let mut raw_data: Vec<u8> = vec![];
-    raw_data.append(network_id_xdr);
+    raw_data.extend_from_slice(network_id_xdr);
     raw_data.append(&mut env_type_auth());
     raw_data.append(&mut auth_cert.expiration.to_xdr());
 

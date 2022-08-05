@@ -1,8 +1,17 @@
 use substrate_stellar_sdk::compound_types::LimitedString;
 
 use substrate_stellar_sdk::PublicKey;
-use substrate_stellar_sdk::types::{AuthCert, Hello, StellarMessage, Uint256};
+use substrate_stellar_sdk::types::{Auth, AuthCert, Hello, StellarMessage, Uint256};
 use crate::node::NodeInfo;
+
+
+pub fn create_auth_message() -> StellarMessage {
+    let auth = Auth {
+        unused: 1
+    };
+
+    StellarMessage::Auth(auth)
+}
 
 pub fn create_hello_message(
     peer_id: PublicKey,

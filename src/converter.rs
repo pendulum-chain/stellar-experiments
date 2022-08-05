@@ -8,7 +8,6 @@ pub enum Error {
     UsizeToU32ExceedMax
 }
 
-
 fn to_bytes<T: XdrCodec>(xdr:&T) -> Result<[u8;4], Error>{
     u32::try_from(xdr.to_xdr().len())
         .map(|len| len.to_be_bytes())

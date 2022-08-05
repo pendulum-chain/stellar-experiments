@@ -2,8 +2,9 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 use substrate_stellar_sdk::{PublicKey, XdrCodec};
-use substrate_stellar_sdk::types::{AuthenticatedMessage, AuthenticatedMessageV0, Curve25519Public, HmacSha256Mac, StellarMessage, Uint256};
-use crate::connection::authentication::{ConnectionAuth, create_sha256_hmac};
+use substrate_stellar_sdk::types::{AuthenticatedMessage, AuthenticatedMessageV0, Curve25519Public, Error as SubstrateStellarError, Hello, HmacSha256Mac, StellarMessage, Uint256};
+use crate::connection::authentication::{ConnectionAuth, create_sha256_hmac, verify_remote_auth_cert};
+use crate::connection::Error as ConnectionError;
 use crate::connection::handshake::create_hello_message;
 use crate::node::NodeInfo;
 
@@ -13,11 +14,11 @@ pub struct Connection {
     pub local_node: NodeInfo,
     pub local_listening_port: u32,
     pub remote_pub_key_ecdh: Option<Curve25519Public>,
-    pub sending_mac_key: Option<PublicKey>,
+    pub remote_pub_key: PublicKey,
+    pub remote_nonce: Uint256,
     pub remote_node: Option<NodeInfo>,
+    pub sending_mac_key: Option<PublicKey>,
     connection_auth: ConnectionAuth,
-
-
 }
 
 impl Connection {
@@ -41,7 +42,6 @@ impl Connection {
                 create_sha256_hmac(&buffer,key.as_binary())
             }
         }
-
     }
 
     /// Wraps the stellar message with `AuthenticatedMessage
@@ -79,5 +79,28 @@ impl Connection {
             self.local_listening_port,
             &self.local_node
         )
+    }
+
+    fn process_hello_message(&mut self, hello: Hello) -> Result<(),ConnectionError> {
+        let time_now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        let mut network_id = self.connection_auth.network_id();
+        if !verify_remote_auth_cert(
+            time_now,
+            &hello.peer_id,
+            &hello.cert,
+            network_id
+        ) {
+            return Err(ConnectionError::AuthCertInvalid);
+        }
+
+        self.remote_nonce = hello.nonce;
+        self.remote_pub_key_ecdh = Some(hello.cert.pubkey);
+       // self.remote_pub_key =
+
+        Ok(())
     }
 }
