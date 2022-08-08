@@ -87,12 +87,12 @@ impl Connection {
             .unwrap()
             .as_secs();
 
-        let mut network_id = self.connection_auth.network_id();
+        let mut network_id = self.connection_auth.network_id().to_xdr();
         if !verify_remote_auth_cert(
             time_now,
             &hello.peer_id,
             &hello.cert,
-            network_id
+            &mut network_id
         ) {
             return Err(ConnectionError::AuthCertInvalid);
         }

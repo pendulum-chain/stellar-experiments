@@ -5,9 +5,8 @@
 pub enum Error {
     AuthCertExpired,
     AuthCertNotFound,
-    AuthCertInvalid
-
-
+    AuthCertInvalid,
+    HmacError(hmac::digest::MacError)
 }
 
 

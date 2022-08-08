@@ -11,6 +11,7 @@ use substrate_stellar_sdk::{Curve25519Secret, PublicKey, SecretKey, XdrCodec};
 use crate::connection::Error;
 
 type Buffer = [u8; 32];
+type HmacSha256 = Hmac<Sha256>;
 
 fn env_type_auth() -> Vec<u8> {
     b"envelopeTypeAuth".to_xdr()
@@ -146,8 +147,6 @@ impl ConnectionAuth {
 }
 
 pub fn create_sha256_hmac(data_buffer: &[u8], mac_key_buffer: &Buffer) -> HmacSha256Mac {
-    type HmacSha256 = Hmac<Sha256>;
-
     let mut hmac = HmacSha256::new_from_slice(mac_key_buffer).unwrap();
     hmac.update(data_buffer);
     let hmac = hmac.finalize().into_bytes().to_vec();
@@ -156,6 +155,78 @@ pub fn create_sha256_hmac(data_buffer: &[u8], mac_key_buffer: &Buffer) -> HmacSh
         mac: hmac.try_into().unwrap(),
     }
 }
+
+
+pub fn verify_hmac(data_buffer: &[u8], mac_key_buffer: &Buffer, mac: &Buffer) -> Result<(),Error> {
+    let mut hmac = HmacSha256::new_from_slice(mac_key_buffer).unwrap();
+    hmac.update(data_buffer);
+
+    hmac.verify_slice(mac).map_err(|e| Error::HmacError(e))
+
+}
+
+fn create_mac_key(shared_key: &HmacSha256Mac,
+                  local_nonce: Uint256,
+                  remote_nonce: Uint256,
+                  mut buf:Vec<u8> ) -> HmacSha256Mac {
+    let mut local_n = local_nonce.to_vec();
+    let mut remote_n = remote_nonce.to_vec();
+
+    buf.append(&mut local_n);
+    buf.append(&mut remote_n);
+    buf.append(&mut vec![1]);
+
+    create_sha256_hmac(&buf,&shared_key.mac )
+}
+
+pub fn create_sending_mac_key(
+    shared_key: &HmacSha256Mac,
+    local_nonce: Uint256,
+    remote_nonce: Uint256,
+    we_called_remote: bool
+) -> HmacSha256Mac {
+    let mut buf: Vec<u8> = vec![];
+
+    if we_called_remote {
+        buf.append(&mut vec![0]);
+    } else {
+        buf.append(&mut vec![1]);
+    }
+
+    let mut local_n = local_nonce.to_vec();
+    let mut remote_n = remote_nonce.to_vec();
+
+    buf.append(&mut local_n);
+    buf.append(&mut remote_n);
+    buf.append(&mut vec![1]);
+
+    create_sha256_hmac(&buf,&shared_key.mac )
+}
+
+pub fn create_receiving_mac_key(
+    shared_key: &HmacSha256Mac,
+    local_nonce: Uint256,
+    remote_nonce: Uint256,
+    we_called_remote: bool
+) -> HmacSha256Mac {
+    let mut buf: Vec<u8> = vec![];
+
+    if we_called_remote {
+        buf.append(&mut vec![1]);
+    } else {
+        buf.append(&mut vec![0]);
+    }
+
+    let mut local_n = local_nonce.to_vec();
+    let mut remote_n = remote_nonce.to_vec();
+
+    buf.append(&mut remote_n);
+    buf.append(&mut local_n);
+    buf.append(&mut vec![1]);
+
+    create_sha256_hmac(&buf,&shared_key.mac )
+}
+
 
 fn create_auth_cert(
     expiration: u64,
@@ -202,37 +273,15 @@ pub fn verify_remote_auth_cert(
     remote_pub_key.verify_signature(raw_data, &raw_sig)
 }
 
-fn create_sending_mac_key(
-    local_nonce: Uint256,
-    remote_nonce: Uint256,
-    remote_pub_key: Curve25519Public,
-    we_called_remote: bool,
-) {
-    let mut local_n = local_nonce.to_vec();
-    let mut remote_n = remote_nonce.to_vec();
-
-    let mut buf: Vec<u8> = vec![];
-
-    if we_called_remote {
-        buf.append(&mut vec![0]);
-    } else {
-        buf.append(&mut vec![1]);
-    }
-
-    buf.append(&mut local_n);
-    buf.append(&mut remote_n);
-    buf.append(&mut vec![1]);
-}
-
 #[cfg(test)]
 mod test {
-
-    use crate::connection::authentication::{
-        create_auth_cert, verify_remote_auth_cert, ConnectionAuth, AUTH_CERT_EXPIRATION_LIMIT,
-    };
+    use std::ptr::hash;
+    use crate::connection::authentication::{create_auth_cert, verify_remote_auth_cert, ConnectionAuth, AUTH_CERT_EXPIRATION_LIMIT, create_receiving_mac_key, create_sending_mac_key, create_sha256_hmac, verify_hmac};
     use std::time::{SystemTime, UNIX_EPOCH};
+    use rand::Rng;
+    use sha2::{Sha256, Digest};
     use substrate_stellar_sdk::network::Network;
-    use substrate_stellar_sdk::types::Curve25519Public;
+    use substrate_stellar_sdk::types::{Curve25519Public, HmacSha256Mac, Uint256};
     use substrate_stellar_sdk::{PublicKey, SecretKey, XdrCodec};
     use crate::connection::Error;
 
@@ -243,6 +292,16 @@ mod test {
                 .expect("should work");
 
         ConnectionAuth::new(public_network, secret, 0)
+    }
+
+    // Returns a new BigNumber with a pseudo-random value equal to or greater than 0 and less than 1.
+    fn generate_random_nonce() -> Uint256 {
+        let mut rng = rand::thread_rng();
+        let random_float = rng.gen_range(0.00..1.00);
+        let mut hash = Sha256::new();
+        hash.update(random_float.to_string());
+
+       hash.finalize().to_vec().try_into().unwrap()
     }
 
     #[test]
@@ -309,5 +368,60 @@ mod test {
         let shared_key = auth.generate_and_save_shared_key(&remote_pub_key, true);
 
         assert_eq!(auth.shared_key(&remote_pub_key, true), Some(&shared_key));
+    }
+
+    #[test]
+    fn mac_test() {
+
+        fn data_message() -> Vec<u8> {
+            let mut peer_sequence = 10u64.to_xdr();
+
+            let mut message = base64::decode_config(
+                "AAAAAAAAAAAAAAE3AAAACwAAAACslTOENMyaVlaiRvFAjiP6s8nFVIHDgWGbncnw+ziO5gAAAAACKbcUAAAAAzQaCq4p6tLHpdfwGhnlyX9dMUP70r4Dm98Td6YvKnhoAAAAAQAAAJijLxoAW1ZSaVphczIXU0XT7i46Jla6OZxkm9mEUfan3gAAAABg6Ee9AAAAAAAAAAEAAAAA+wsSteGzmcH88GN69FRjGLfxMzFH8tsJTaK+8ERePJMAAABAOiGtC3MiMa3LVn8f6SwUpKOmSMAJWQt2vewgt8T9WkRUPt2UdYac7vzcisXnmiusHldZcjVMF3vS03QhzaxdDQAAAAEAAACYoy8aAFtWUmlaYXMyF1NF0+4uOiZWujmcZJvZhFH2p94AAAAAYOhHvQAAAAAAAAABAAAAAPsLErXhs5nB/PBjevRUYxi38TMxR/LbCU2ivvBEXjyTAAAAQDohrQtzIjGty1Z/H+ksFKSjpkjACVkLdr3sILfE/VpEVD7dlHWGnO783IrF55orrB5XWXI1TBd70tN0Ic2sXQ0AAABA0ZiyH9AGgPR/d3h+94s6+iU5zhZbKM/5DIOYeKgxwEOotUveGfHLN5IQk7VlTW2arDkk+ekzjRQfBoexrkJrBMsQ30YpI1R/uY9npg0Fpt1ScyZ+yhABs6x1sEGminNh",
+                base64::STANDARD,
+            ).unwrap();
+
+            let mut buf = vec![];
+            buf.append(&mut peer_sequence);
+            buf.append(&mut message);
+
+            buf
+        }
+
+        let mut con_auth = mock_connection_auth();
+
+        let public_network = Network::new(b"Public Global Stellar Network ; September 2015");
+        let secret =
+            SecretKey::from_encoding("SDAL6QYZG7O26OTLLP7JLNSB6SHY3CBZGJAWDPHYMRW2J3D2SA2RWU3L")
+                .expect("should work");
+        let mut peer_auth = ConnectionAuth::new(public_network, secret, 0);
+
+        let our_nonce = generate_random_nonce();
+        let peer_nonce = generate_random_nonce();
+
+        let recv_mac_key = {
+            let remote_pub_key = PublicKey::from_binary(peer_auth.pub_key_ecdh.key);
+            let shared_key = con_auth.generate_and_save_shared_key(&remote_pub_key,true);
+
+            create_receiving_mac_key(&shared_key,our_nonce,peer_nonce,true)
+        };
+
+        let peer_sending_mac_key = {
+            let remote_pub_key = PublicKey::from_binary(con_auth.pub_key_ecdh.key);
+            let shared_key = peer_auth.generate_and_save_shared_key(&remote_pub_key,false);
+
+            create_sending_mac_key(&shared_key,peer_nonce,our_nonce,false)
+        };
+
+        let mut mac_peer_uses_to_send_us_msg =
+            create_sha256_hmac(&data_message(),&peer_sending_mac_key.mac);
+
+        assert!(
+            verify_hmac(
+                &data_message(),
+                &recv_mac_key.mac,
+                &mac_peer_uses_to_send_us_msg.mac
+            ).is_ok()
+        );
     }
 }
