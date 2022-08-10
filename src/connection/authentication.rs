@@ -2,30 +2,28 @@
 
 use hmac::{Hmac, Mac};
 use rand::Rng;
-use sha2::Sha256;
+use sha2::{Sha256, Digest};
 use std::collections::HashMap;
 
 use substrate_stellar_sdk::network::Network;
-use substrate_stellar_sdk::types::{AuthCert, Curve25519Public, HmacSha256Mac, Signature, Uint256};
+use substrate_stellar_sdk::types::{AuthCert, Curve25519Public, EnvelopeType, HmacSha256Mac, Signature, Uint256};
 use substrate_stellar_sdk::{Curve25519Secret, PublicKey, SecretKey, XdrCodec};
 use crate::connection::Error;
 
 type Buffer = [u8; 32];
+type KeyAsBinary = [u8; 32];
 type HmacSha256 = Hmac<Sha256>;
 
-fn env_type_auth() -> Vec<u8> {
-    b"envelopeTypeAuth".to_xdr()
-}
+pub const AUTH_CERT_EXPIRATION_LIMIT: u64 = 360000; // 60 minutes
 
-pub const AUTH_CERT_EXPIRATION_LIMIT: u64 = 3600; // 60 minutes
 
 pub struct ConnectionAuth {
     keypair: SecretKey,
     secret_key_ecdh: Curve25519Secret,
     pub_key_ecdh: Curve25519Public,
     network: Network,
-    we_called_remote_shared_keys: HashMap<[u8; 32], HmacSha256Mac>,
-    remote_called_us_shared_keys: HashMap<[u8; 32], HmacSha256Mac>,
+    we_called_remote_shared_keys: HashMap<KeyAsBinary, HmacSha256Mac>,
+    remote_called_us_shared_keys: HashMap<KeyAsBinary, HmacSha256Mac>,
     auth_cert: Option<AuthCert>,
     auth_cert_expiration: u64,
 }
@@ -56,7 +54,7 @@ impl ConnectionAuth {
         &self.pub_key_ecdh
     }
 
-    pub fn network_id(&self) -> &[u8; 32] {
+    pub fn network_id(&self) -> &Buffer {
         self.network.get_id()
     }
 
@@ -134,6 +132,7 @@ impl ConnectionAuth {
         let mut network_id_xdr = self.network.get_id().to_xdr();
         self.auth_cert_expiration = valid_at + AUTH_CERT_EXPIRATION_LIMIT;
 
+        println!("AUTH CERT EXPIRATION: {}", self.auth_cert_expiration);
         let auth_cert = create_auth_cert(
             self.auth_cert_expiration,
             &mut network_id_xdr,
@@ -231,20 +230,25 @@ pub fn create_receiving_mac_key(
 fn create_auth_cert(
     expiration: u64,
     network_id_xdr: &mut Vec<u8>,
-    pub_key: Curve25519Public,
+    pub_key_ecdh: Curve25519Public,
     secret: &SecretKey,
 ) -> AuthCert {
     let mut buf: Vec<u8> = vec![];
 
     buf.append(network_id_xdr);
-    buf.append(&mut env_type_auth());
+    buf.append(&mut EnvelopeType::EnvelopeTypeAuth.to_xdr());
     buf.append(&mut expiration.to_xdr());
-    buf.append(&mut pub_key.to_xdr());
+    buf.append(&mut pub_key_ecdh.key.to_vec());
+
+    let mut hash = Sha256::new();
+    hash.update(buf);
+
+    let buf = hash.finalize().to_vec();
 
     let signature: Signature = Signature::new(secret.create_signature(buf).to_vec()).unwrap();
 
     AuthCert {
-        pubkey: pub_key,
+        pubkey: pub_key_ecdh,
         expiration,
         sig: signature,
     }
@@ -258,13 +262,12 @@ pub fn verify_remote_auth_cert(
 ) -> bool {
     let expiration = auth_cert.expiration;
     if expiration <= (time_in_secs / 1000) {
-        //TODO: not really sure of the 1000
         return false;
     }
 
     let mut raw_data: Vec<u8> = vec![];
     raw_data.extend_from_slice(network_id_xdr);
-    raw_data.append(&mut env_type_auth());
+    raw_data.append(&mut EnvelopeType::EnvelopeTypeAuth.to_xdr());
     raw_data.append(&mut auth_cert.expiration.to_xdr());
 
     raw_data.append(&mut auth_cert.pubkey.key.to_vec());
@@ -273,12 +276,21 @@ pub fn verify_remote_auth_cert(
     remote_pub_key.verify_signature(raw_data, &raw_sig)
 }
 
+// Returns a new BigNumber with a pseudo-random value equal to or greater than 0 and less than 1.
+pub fn generate_random_nonce() -> Uint256 {
+    let mut rng = rand::thread_rng();
+    let random_float = rng.gen_range(0.00..1.00);
+    let mut hash = Sha256::new();
+    hash.update(random_float.to_string());
+
+    hash.finalize().to_vec().try_into().unwrap()
+}
+
 #[cfg(test)]
 mod test {
-    use std::ptr::hash;
-    use crate::connection::authentication::{create_auth_cert, verify_remote_auth_cert, ConnectionAuth, AUTH_CERT_EXPIRATION_LIMIT, create_receiving_mac_key, create_sending_mac_key, create_sha256_hmac, verify_hmac};
+    use crate::connection::authentication::{create_auth_cert, verify_remote_auth_cert, ConnectionAuth, AUTH_CERT_EXPIRATION_LIMIT, create_receiving_mac_key, create_sending_mac_key, create_sha256_hmac, verify_hmac, generate_random_nonce};
     use std::time::{SystemTime, UNIX_EPOCH};
-    use rand::Rng;
+
     use sha2::{Sha256, Digest};
     use substrate_stellar_sdk::network::Network;
     use substrate_stellar_sdk::types::{Curve25519Public, HmacSha256Mac, Uint256};
@@ -292,16 +304,6 @@ mod test {
                 .expect("should work");
 
         ConnectionAuth::new(public_network, secret, 0)
-    }
-
-    // Returns a new BigNumber with a pseudo-random value equal to or greater than 0 and less than 1.
-    fn generate_random_nonce() -> Uint256 {
-        let mut rng = rand::thread_rng();
-        let random_float = rng.gen_range(0.00..1.00);
-        let mut hash = Sha256::new();
-        hash.update(random_float.to_string());
-
-       hash.finalize().to_vec().try_into().unwrap()
     }
 
     #[test]

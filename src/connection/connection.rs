@@ -6,6 +6,7 @@ use substrate_stellar_sdk::types::{AuthenticatedMessage, AuthenticatedMessageV0,
 use crate::connection::authentication::{ConnectionAuth, create_sha256_hmac, verify_remote_auth_cert};
 use crate::connection::Error as ConnectionError;
 use crate::connection::handshake::create_hello_message;
+use crate::generate_random_nonce;
 use crate::node::NodeInfo;
 
 pub struct Connection {
@@ -14,14 +15,28 @@ pub struct Connection {
     pub local_node: NodeInfo,
     pub local_listening_port: u32,
     pub remote_pub_key_ecdh: Option<Curve25519Public>,
-    pub remote_pub_key: PublicKey,
-    pub remote_nonce: Uint256,
+    pub remote_pub_key: Option<PublicKey>,
+    pub remote_nonce: Option<Uint256>,
     pub remote_node: Option<NodeInfo>,
     pub sending_mac_key: Option<PublicKey>,
     connection_auth: ConnectionAuth,
 }
 
 impl Connection {
+    pub fn new(local_node: NodeInfo, connection_auth:ConnectionAuth) -> Connection {
+        Connection {
+            local_sequence: 0,
+            local_nonce:generate_random_nonce(),
+            local_node,
+            local_listening_port: 11625,
+            remote_pub_key_ecdh: None,
+            remote_pub_key: None,
+            remote_nonce: None,
+            remote_node: None,
+            sending_mac_key: None,
+            connection_auth
+        }
+    }
 
     /// Returns HmacSha256Mac
     fn mac(&self, message: &StellarMessage) -> HmacSha256Mac {
@@ -45,7 +60,7 @@ impl Connection {
     }
 
     /// Wraps the stellar message with `AuthenticatedMessage
-    pub fn wrap_with_authenticated_message(&mut self, message: StellarMessage) -> AuthenticatedMessage {
+    pub fn authenticate_message(&mut self, message: StellarMessage) -> AuthenticatedMessage {
         let mac = self.mac(&message);
         let sequence = self.local_sequence;
 
@@ -67,8 +82,9 @@ impl Connection {
         let time_now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
-            .as_secs();
+            .as_millis();
 
+        let time_now = u64::try_from(time_now).unwrap();
         let auth_cert = self.connection_auth.generate_and_save_auth_cert(time_now);
         let peer_id = self.connection_auth.keypair().get_public();
 
@@ -97,9 +113,8 @@ impl Connection {
             return Err(ConnectionError::AuthCertInvalid);
         }
 
-        self.remote_nonce = hello.nonce;
+        self.remote_nonce = Some(hello.nonce);
         self.remote_pub_key_ecdh = Some(hello.cert.pubkey);
-       // self.remote_pub_key =
 
         Ok(())
     }

@@ -11,6 +11,21 @@ pub struct NodeInfo {
 }
 
 impl NodeInfo {
+    pub fn new(
+        ledger_version:u32,
+        overlay_version: u32,
+        overlay_min_version: u32,
+        version_str: String,
+        network:Network
+    ) -> NodeInfo {
+        NodeInfo {
+            ledger_version,
+            overlay_version,
+            overlay_min_version,
+            version_str,
+            network
+        }
+    }
     pub fn network_id(&self) -> &NetworkId {
         self.network.get_id()
     }
