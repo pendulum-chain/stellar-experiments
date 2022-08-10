@@ -34,13 +34,6 @@ fn main() -> std::io::Result<()> {
         0
     );
 
-    let time_now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_millis();
-    let time_now = u64::try_from(time_now).unwrap();
-    let _ = con_auth.generate_and_save_auth_cert(time_now);
-
     let node_info = NodeInfo::new(
         19,
         21,
@@ -88,8 +81,11 @@ fn main() -> std::io::Result<()> {
 
             let sequence_number_xdr = &readbuf[4..12];
             println!("sequence_number_xdr: {:?}", sequence_number_xdr);
+
             let message_type_xdr = &readbuf[12..16];
             println!("message_type_xdr: {:?}", message_type_xdr);
+
+
             let mac_xdr = &readbuf[size-32..size];
             println!("mac_xdr: {:?}", mac_xdr);
 

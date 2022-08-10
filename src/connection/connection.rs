@@ -83,8 +83,8 @@ impl Connection {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_millis();
-
         let time_now = u64::try_from(time_now).unwrap();
+
         let auth_cert = self.connection_auth.generate_and_save_auth_cert(time_now);
         let peer_id = self.connection_auth.keypair().get_public();
 
@@ -101,7 +101,8 @@ impl Connection {
         let time_now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
-            .as_secs();
+            .as_millis();
+        let time_now = u64::try_from(time_now).unwrap();
 
         let mut network_id = self.connection_auth.network_id().to_xdr();
         if !verify_remote_auth_cert(
