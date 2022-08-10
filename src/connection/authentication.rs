@@ -132,7 +132,6 @@ impl ConnectionAuth {
         let mut network_id_xdr = self.network.get_id().to_xdr();
         self.auth_cert_expiration = valid_at + AUTH_CERT_EXPIRATION_LIMIT;
 
-        println!("AUTH CERT EXPIRATION: {}", self.auth_cert_expiration);
         let auth_cert = create_auth_cert(
             self.auth_cert_expiration,
             &mut network_id_xdr,
@@ -255,13 +254,13 @@ fn create_auth_cert(
 }
 
 pub fn verify_remote_auth_cert(
-    time_in_secs: u64,
+    time_in_millisecs: u64,
     remote_pub_key: &PublicKey,
     auth_cert: &AuthCert,
     network_id_xdr: &mut [u8],
 ) -> bool {
     let expiration = auth_cert.expiration;
-    if expiration <= (time_in_secs / 1000) {
+    if expiration <= (time_in_millisecs / 1000) {
         return false;
     }
 
@@ -269,8 +268,12 @@ pub fn verify_remote_auth_cert(
     raw_data.extend_from_slice(network_id_xdr);
     raw_data.append(&mut EnvelopeType::EnvelopeTypeAuth.to_xdr());
     raw_data.append(&mut auth_cert.expiration.to_xdr());
-
     raw_data.append(&mut auth_cert.pubkey.key.to_vec());
+
+    let mut hash = Sha256::new();
+    hash.update(raw_data);
+
+    let raw_data = hash.finalize().to_vec();
 
     let raw_sig: [u8; 64] = auth_cert.sig.get_vec().clone().try_into().unwrap();
     remote_pub_key.verify_signature(raw_data, &raw_sig)
@@ -313,7 +316,8 @@ mod test {
         let time_now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
-            .as_secs();
+            .as_millis();
+        let time_now = u64::try_from(time_now).unwrap();
 
         let auth_cert = auth.generate_and_save_auth_cert(time_now);
 
