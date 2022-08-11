@@ -1,7 +1,8 @@
 #![allow(dead_code)] //todo: remove after being tested and implemented
 
 use std::time::{SystemTime, UNIX_EPOCH};
-use substrate_stellar_sdk::{PublicKey, XdrCodec};
+use substrate_stellar_sdk::{PublicKey, SecretKey, XdrCodec};
+use substrate_stellar_sdk::network::Network;
 use substrate_stellar_sdk::types::{AuthenticatedMessage, AuthenticatedMessageV0, Curve25519Public, Error as SubstrateStellarError, Hello, HmacSha256Mac, StellarMessage, Uint256};
 use crate::connection::authentication::{ConnectionAuth, create_sha256_hmac, verify_remote_auth_cert};
 use crate::connection::Error as ConnectionError;
@@ -23,7 +24,18 @@ pub struct Connection {
 }
 
 impl Connection {
-    pub fn new(local_node: NodeInfo, connection_auth:ConnectionAuth) -> Connection {
+    pub fn new(
+        local_node: NodeInfo,
+        network: Network,
+        keypair:SecretKey,
+        auth_cert_expiration: u64
+    ) -> Connection {
+        let mut connection_auth = ConnectionAuth::new(
+            network,
+            keypair,
+            auth_cert_expiration
+        );
+
         Connection {
             local_sequence: 0,
             local_nonce:generate_random_nonce(),
