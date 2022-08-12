@@ -1,27 +1,28 @@
 #![allow(dead_code)] //todo: remove after being tested and implemented
 
 use hmac::{Hmac, Mac};
-use rand::Rng;
 use sha2::{Sha256, Digest};
 use std::collections::HashMap;
+use rand::Rng;
 
 use substrate_stellar_sdk::network::Network;
+
 use substrate_stellar_sdk::types::{AuthCert, Curve25519Public, EnvelopeType, HmacSha256Mac, Signature, Uint256};
 use substrate_stellar_sdk::{Curve25519Secret, PublicKey, SecretKey, XdrCodec};
 use crate::connection::Error;
+use crate::helper::create_sha256_hmac;
 
-type Buffer = [u8; 32];
 type KeyAsBinary = [u8; 32];
-type HmacSha256 = Hmac<Sha256>;
+pub type BinarySha256Hash = [u8; 32];
 
 pub const AUTH_CERT_EXPIRATION_LIMIT: u64 = 360000; // 60 minutes
 
 
-pub struct ConnectionAuth {
+pub struct ConnectionAuth{
     keypair: SecretKey,
     secret_key_ecdh: Curve25519Secret,
     pub_key_ecdh: Curve25519Public,
-    network: Network,
+    network_hash: BinarySha256Hash,
     we_called_remote_shared_keys: HashMap<KeyAsBinary, HmacSha256Mac>,
     remote_called_us_shared_keys: HashMap<KeyAsBinary, HmacSha256Mac>,
     auth_cert: Option<AuthCert>,
@@ -29,16 +30,16 @@ pub struct ConnectionAuth {
 }
 
 impl ConnectionAuth {
-    pub fn new(network: Network, keypair: SecretKey, auth_cert_expiration: u64) -> ConnectionAuth {
-        let secret_key = rand::thread_rng().gen::<Buffer>();
-        let mut pub_key: Buffer = [0; 32];
+    pub fn new(network: &BinarySha256Hash, keypair: SecretKey, auth_cert_expiration: u64) -> ConnectionAuth {
+        let secret_key = rand::thread_rng().gen::<KeyAsBinary>();
+        let mut pub_key: KeyAsBinary = [0; 32];
         tweetnacl::scalarmult_base(&mut pub_key, &secret_key);
 
         ConnectionAuth {
             keypair,
             secret_key_ecdh: Curve25519Secret { key: secret_key },
             pub_key_ecdh: Curve25519Public { key: pub_key },
-            network,
+            network_hash: *network,
             we_called_remote_shared_keys: HashMap::new(),
             remote_called_us_shared_keys: HashMap::new(),
             auth_cert: None,
@@ -54,8 +55,8 @@ impl ConnectionAuth {
         &self.pub_key_ecdh
     }
 
-    pub fn network_id(&self) -> &Buffer {
-        self.network.get_id()
+    pub fn network_id(&self) -> &BinarySha256Hash {
+        &self.network_hash
     }
 
     /// Gets an existing shared key.
@@ -82,7 +83,7 @@ impl ConnectionAuth {
     ) -> HmacSha256Mac {
         // prepare the buffers
         let mut final_buffer: Vec<u8> = vec![];
-        let mut buffer: Buffer = [0; 32];
+        let mut buffer: [u8; 32] = [0; 32];
 
         let remote_pub_key_bin = remote_pub_key.as_binary();
         tweetnacl::scalarmult(&mut buffer, &self.secret_key_ecdh.key, remote_pub_key_bin);
@@ -115,7 +116,7 @@ impl ConnectionAuth {
     ///  or if an auth cert was never created in the first place.
     ///
     /// # Arguments
-    /// * `valid_at` - the validity start date in seconds.
+    /// * `valid_at` - the validity start date in milliseconds.
     pub fn auth_cert(&self, valid_at: u64) -> Result<&AuthCert, Error> {
         match self.auth_cert.as_ref() {
             None => Err(Error::AuthCertNotFound),
@@ -128,8 +129,9 @@ impl ConnectionAuth {
         }
     }
 
+    /// Generates a new auth cert, and saves it in the map.
     pub fn generate_and_save_auth_cert(&mut self, valid_at: u64) -> AuthCert {
-        let mut network_id_xdr = self.network.get_id().to_xdr();
+        let mut network_id_xdr = self.network_hash.to_xdr();
         self.auth_cert_expiration = valid_at + AUTH_CERT_EXPIRATION_LIMIT;
 
         let auth_cert = create_auth_cert(
@@ -142,25 +144,6 @@ impl ConnectionAuth {
         self.auth_cert = Some(auth_cert.clone());
         auth_cert
     }
-}
-
-pub fn create_sha256_hmac(data_buffer: &[u8], mac_key_buffer: &Buffer) -> HmacSha256Mac {
-    let mut hmac = HmacSha256::new_from_slice(mac_key_buffer).unwrap();
-    hmac.update(data_buffer);
-    let hmac = hmac.finalize().into_bytes().to_vec();
-
-    HmacSha256Mac {
-        mac: hmac.try_into().unwrap(),
-    }
-}
-
-
-pub fn verify_hmac(data_buffer: &[u8], mac_key_buffer: &Buffer, mac: &Buffer) -> Result<(),Error> {
-    let mut hmac = HmacSha256::new_from_slice(mac_key_buffer).unwrap();
-    hmac.update(data_buffer);
-
-    hmac.verify_slice(mac).map_err(|e| Error::HmacError(e))
-
 }
 
 fn create_mac_key(shared_key: &HmacSha256Mac,
@@ -243,7 +226,6 @@ fn create_auth_cert(
     hash.update(buf);
 
     let buf = hash.finalize().to_vec();
-
     let signature: Signature = Signature::new(secret.create_signature(buf).to_vec()).unwrap();
 
     AuthCert {
@@ -279,19 +261,9 @@ pub fn verify_remote_auth_cert(
     remote_pub_key.verify_signature(raw_data, &raw_sig)
 }
 
-// Returns a new BigNumber with a pseudo-random value equal to or greater than 0 and less than 1.
-pub fn generate_random_nonce() -> Uint256 {
-    let mut rng = rand::thread_rng();
-    let random_float = rng.gen_range(0.00..1.00);
-    let mut hash = Sha256::new();
-    hash.update(random_float.to_string());
-
-    hash.finalize().to_vec().try_into().unwrap()
-}
-
 #[cfg(test)]
 mod test {
-    use crate::connection::authentication::{create_auth_cert, verify_remote_auth_cert, ConnectionAuth, AUTH_CERT_EXPIRATION_LIMIT, create_receiving_mac_key, create_sending_mac_key, create_sha256_hmac, verify_hmac, generate_random_nonce};
+    use crate::connection::authentication::{create_auth_cert, verify_remote_auth_cert, ConnectionAuth, AUTH_CERT_EXPIRATION_LIMIT, create_receiving_mac_key, create_sending_mac_key};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use sha2::{Sha256, Digest};
@@ -299,6 +271,7 @@ mod test {
     use substrate_stellar_sdk::types::{Curve25519Public, HmacSha256Mac, Uint256};
     use substrate_stellar_sdk::{PublicKey, SecretKey, XdrCodec};
     use crate::connection::Error;
+    use crate::helper::{create_sha256_hmac, generate_random_nonce, verify_hmac};
 
     fn mock_connection_auth() -> ConnectionAuth {
         let public_network = Network::new(b"Public Global Stellar Network ; September 2015");
@@ -306,7 +279,7 @@ mod test {
             SecretKey::from_encoding("SCV6Q3VU4S52KVNJOFXWTHFUPHUKVYK3UV2ISGRLIUH54UGC6OPZVK2D")
                 .expect("should work");
 
-        ConnectionAuth::new(public_network, secret, 0)
+        ConnectionAuth::new(public_network.get_id(), secret, 0)
     }
 
     #[test]
@@ -321,7 +294,7 @@ mod test {
 
         let auth_cert = auth.generate_and_save_auth_cert(time_now);
 
-        let mut network_id_xdr = auth.network.get_id().to_xdr();
+        let mut network_id_xdr = auth.network_id().to_xdr();
         let mut pub_key = auth.keypair.get_public();
         assert!(verify_remote_auth_cert(
             time_now,
@@ -360,7 +333,7 @@ mod test {
             SecretKey::from_encoding("SCV6Q3VU4S52KVNJOFXWTHFUPHUKVYK3UV2ISGRLIUH54UGC6OPZVK2D")
                 .expect("should work");
 
-        let mut auth = ConnectionAuth::new(public_network, secret, 0);
+        let mut auth = ConnectionAuth::new(public_network.get_id(), secret, 0);
 
         let bytes = base64::decode_config(
             "SaINZpCTl6KO8xMLvDkE2vE3knQz0Ma1RmJySOFqsWk=",
@@ -400,7 +373,7 @@ mod test {
         let secret =
             SecretKey::from_encoding("SDAL6QYZG7O26OTLLP7JLNSB6SHY3CBZGJAWDPHYMRW2J3D2SA2RWU3L")
                 .expect("should work");
-        let mut peer_auth = ConnectionAuth::new(public_network, secret, 0);
+        let mut peer_auth = ConnectionAuth::new(public_network.get_id(), secret, 0);
 
         let our_nonce = generate_random_nonce();
         let peer_nonce = generate_random_nonce();

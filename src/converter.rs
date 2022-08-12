@@ -10,28 +10,33 @@ pub enum Error {
     DecodeError(String)
 }
 
-fn to_bytes<T: XdrCodec>(xdr:&T) -> Result<[u8;4], Error>{
-    u32::try_from(xdr.to_xdr().len())
-        .map(|len| len.to_be_bytes())
-        .map_err(|_| Error::UsizeToU32ExceedMax)
-}
 
+/// Returns XDR format of the message or
+/// an error when the message length exceeds the max of u32
 fn message_to_bytes<T: XdrCodec>(message:&T) -> Result<Vec<u8>, Error> {
-    to_bytes(message)
-        .map(|bytes| {
-            let mut buffer: Vec<u8> = vec![];
-            buffer.extend_from_slice(&bytes);
-            buffer.append(&mut message.to_xdr());
-            buffer
-        })
+    let mut message_xdr = message.to_xdr();
+
+    // get the bytes of the message xdr's length.
+    let message_len_bytes = u32::try_from(message_xdr.len())
+        .map(|len| len.to_be_bytes())
+        .map_err(|_| Error::UsizeToU32ExceedMax)?;
+
+    let mut buffer: Vec<u8> = vec![];
+    // first 4 bytes are for the length
+    buffer.extend_from_slice(&message_len_bytes);
+    // the message
+    buffer.append(&mut message_xdr);
+
+    Ok(buffer)
 }
 
-
-pub fn xdr_buffer_from_authenticated_message(message:&AuthenticatedMessage) -> Result<Vec<u8>, Error>  {
+/// Returns xdr of the authenticated message
+pub fn get_xdr_from_authenticated_message(message:&AuthenticatedMessage) -> Result<Vec<u8>, Error>  {
     message_to_bytes(message)
 }
 
-pub fn xdr_buffer_from_stellar_message(message:&StellarMessage) -> Result<Vec<u8>, Error> {
+/// Returns xdr of the stellar message
+pub fn get_xdr_from_stellar_message(message:&StellarMessage) -> Result<Vec<u8>, Error> {
     message_to_bytes(message)
 }
 
@@ -84,4 +89,26 @@ pub fn secret_key_binary(key:&str) -> [u8;32] {
     let bytes = base64::decode_config(key, base64::STANDARD).unwrap();
     let secret_key = SecretKey::from_binary(bytes.try_into().unwrap());
     secret_key.into_binary()
+}
+
+
+#[cfg(test)]
+mod test {
+    use substrate_stellar_sdk::types::{MessageType, ScpEnvelope, StellarMessage};
+    use substrate_stellar_sdk::XdrCodec;
+    use crate::xdr_buffer_parse_authenticated_message;
+
+    #[test]
+    fn parse_hello_stellar_message_success() {
+        let mut message = base64::decode_config(
+            "AAAADQAAABMAAAAVAAAAE3rDOZdUTjF10ma9AiQ5sizbFlCMARY/JuXLKj4QRal5AAAAB3YxOS4xLjAAAAAtaQAAAACvC49kGL+ELaA8UrxHu2GhTlexuH6TmfWWzwOsKR2Ek2szUiNOwlIpFO6Q94sBXjIDxqIc7Yq1YOCJtNOG3EJeAAABgpDe25MAAABAiyWR0X9nBw489imdKbVQgLSe//8qS8PJ9jmqRUyKBf3nlUhsrlf8xI0gG/ndUrvGT6NkV/eZl85yi6tPIhF4CtOD4qij3KLBOwjXX0YFVtoLnCSGSHey+3CJW23AEqfy",
+            base64::STANDARD,
+        ).unwrap();
+
+        let res = StellarMessage::from_xdr(&message);
+
+        println!("THE STELLAR MESSAGE: {:?}",res);
+
+
+    }
 }

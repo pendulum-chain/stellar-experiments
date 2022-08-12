@@ -1,6 +1,7 @@
 mod connection;
 pub mod node;
 pub mod converter;
+pub mod helper;
 
 
 pub use connection::*;
@@ -38,14 +39,13 @@ fn main() -> std::io::Result<()> {
 
     let mut conn = Connection::new(
         node_info,
-        Network::new(b"Public Global Stellar Network ; September 2015"),
         secret,
         0
     );
 
     let hello_msg = conn.create_hello_message();
     let auth_hello_msg = conn.authenticate_message(hello_msg);
-    let xdr_auth_hello_msg = converter::xdr_buffer_from_authenticated_message(&auth_hello_msg).unwrap();
+    let xdr_auth_hello_msg = converter::get_xdr_from_authenticated_message(&auth_hello_msg).unwrap();
     stream.write(&xdr_auth_hello_msg)?;
     //stream.write(&message);
 
