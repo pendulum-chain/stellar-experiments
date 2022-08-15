@@ -1,16 +1,16 @@
 use hmac::{Hmac, Mac};
 use rand::Rng;
-use sha2::{Sha256, Digest};
+use sha2::{Digest, Sha256};
 use substrate_stellar_sdk::types::{HmacSha256Mac, Uint256};
 
-
 type Buffer = [u8; 32];
-pub type HmacSha256 = Hmac<Sha256>;
 
+// Create alias for HMAC-SHA256
+pub type HmacSha256 = Hmac<Sha256>;
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum Error {
-    HmacError(hmac::digest::MacError)
+    HmacError(hmac::digest::MacError),
 }
 
 pub fn create_sha256_hmac(data_buffer: &[u8], mac_key_buffer: &Buffer) -> HmacSha256Mac {
@@ -23,8 +23,7 @@ pub fn create_sha256_hmac(data_buffer: &[u8], mac_key_buffer: &Buffer) -> HmacSh
     }
 }
 
-
-pub fn verify_hmac(data_buffer: &[u8], mac_key_buffer: &Buffer, mac: &Buffer) -> Result<(),Error> {
+pub fn verify_hmac(data_buffer: &[u8], mac_key_buffer: &Buffer, mac: &Buffer) -> Result<(), Error> {
     let mut hmac = HmacSha256::new_from_slice(mac_key_buffer).unwrap();
     hmac.update(data_buffer);
 

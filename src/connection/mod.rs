@@ -1,5 +1,5 @@
-mod connection;
 mod authentication;
+mod connection;
 mod errors;
 mod handshake;
 

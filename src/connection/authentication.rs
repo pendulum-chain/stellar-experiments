@@ -1,24 +1,22 @@
 #![allow(dead_code)] //todo: remove after being tested and implemented
 
-use hmac::{Hmac, Mac};
-use sha2::{Sha256, Digest};
-use std::collections::HashMap;
 use rand::Rng;
+use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 
-use substrate_stellar_sdk::network::Network;
-
-use substrate_stellar_sdk::types::{AuthCert, Curve25519Public, EnvelopeType, HmacSha256Mac, Signature, Uint256};
-use substrate_stellar_sdk::{Curve25519Secret, PublicKey, SecretKey, XdrCodec};
 use crate::connection::Error;
 use crate::helper::create_sha256_hmac;
+use substrate_stellar_sdk::types::{
+    AuthCert, Curve25519Public, EnvelopeType, HmacSha256Mac, Signature, Uint256,
+};
+use substrate_stellar_sdk::{Curve25519Secret, PublicKey, SecretKey, XdrCodec};
 
 type KeyAsBinary = [u8; 32];
 pub type BinarySha256Hash = [u8; 32];
 
 pub const AUTH_CERT_EXPIRATION_LIMIT: u64 = 360000; // 60 minutes
 
-
-pub struct ConnectionAuth{
+pub struct ConnectionAuth {
     keypair: SecretKey,
     secret_key_ecdh: Curve25519Secret,
     pub_key_ecdh: Curve25519Public,
@@ -30,7 +28,11 @@ pub struct ConnectionAuth{
 }
 
 impl ConnectionAuth {
-    pub fn new(network: &BinarySha256Hash, keypair: SecretKey, auth_cert_expiration: u64) -> ConnectionAuth {
+    pub fn new(
+        network: &BinarySha256Hash,
+        keypair: SecretKey,
+        auth_cert_expiration: u64,
+    ) -> ConnectionAuth {
         let secret_key = rand::thread_rng().gen::<KeyAsBinary>();
         let mut pub_key: KeyAsBinary = [0; 32];
         tweetnacl::scalarmult_base(&mut pub_key, &secret_key);
@@ -146,10 +148,12 @@ impl ConnectionAuth {
     }
 }
 
-fn create_mac_key(shared_key: &HmacSha256Mac,
-                  local_nonce: Uint256,
-                  remote_nonce: Uint256,
-                  mut buf:Vec<u8> ) -> HmacSha256Mac {
+fn create_mac_key(
+    shared_key: &HmacSha256Mac,
+    local_nonce: Uint256,
+    remote_nonce: Uint256,
+    mut buf: Vec<u8>,
+) -> HmacSha256Mac {
     let mut local_n = local_nonce.to_vec();
     let mut remote_n = remote_nonce.to_vec();
 
@@ -157,14 +161,14 @@ fn create_mac_key(shared_key: &HmacSha256Mac,
     buf.append(&mut remote_n);
     buf.append(&mut vec![1]);
 
-    create_sha256_hmac(&buf,&shared_key.mac )
+    create_sha256_hmac(&buf, &shared_key.mac)
 }
 
 pub fn create_sending_mac_key(
     shared_key: &HmacSha256Mac,
     local_nonce: Uint256,
     remote_nonce: Uint256,
-    we_called_remote: bool
+    we_called_remote: bool,
 ) -> HmacSha256Mac {
     let mut buf: Vec<u8> = vec![];
 
@@ -181,14 +185,14 @@ pub fn create_sending_mac_key(
     buf.append(&mut remote_n);
     buf.append(&mut vec![1]);
 
-    create_sha256_hmac(&buf,&shared_key.mac )
+    create_sha256_hmac(&buf, &shared_key.mac)
 }
 
 pub fn create_receiving_mac_key(
     shared_key: &HmacSha256Mac,
     local_nonce: Uint256,
     remote_nonce: Uint256,
-    we_called_remote: bool
+    we_called_remote: bool,
 ) -> HmacSha256Mac {
     let mut buf: Vec<u8> = vec![];
 
@@ -205,9 +209,8 @@ pub fn create_receiving_mac_key(
     buf.append(&mut local_n);
     buf.append(&mut vec![1]);
 
-    create_sha256_hmac(&buf,&shared_key.mac )
+    create_sha256_hmac(&buf, &shared_key.mac)
 }
-
 
 fn create_auth_cert(
     expiration: u64,
@@ -263,15 +266,16 @@ pub fn verify_remote_auth_cert(
 
 #[cfg(test)]
 mod test {
-    use crate::connection::authentication::{create_auth_cert, verify_remote_auth_cert, ConnectionAuth, AUTH_CERT_EXPIRATION_LIMIT, create_receiving_mac_key, create_sending_mac_key};
+    use crate::connection::authentication::{
+        create_receiving_mac_key, create_sending_mac_key, verify_remote_auth_cert, ConnectionAuth,
+        AUTH_CERT_EXPIRATION_LIMIT,
+    };
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use sha2::{Sha256, Digest};
-    use substrate_stellar_sdk::network::Network;
-    use substrate_stellar_sdk::types::{Curve25519Public, HmacSha256Mac, Uint256};
-    use substrate_stellar_sdk::{PublicKey, SecretKey, XdrCodec};
     use crate::connection::Error;
     use crate::helper::{create_sha256_hmac, generate_random_nonce, verify_hmac};
+    use substrate_stellar_sdk::network::Network;
+    use substrate_stellar_sdk::{PublicKey, SecretKey, XdrCodec};
 
     fn mock_connection_auth() -> ConnectionAuth {
         let public_network = Network::new(b"Public Global Stellar Network ; September 2015");
@@ -295,7 +299,7 @@ mod test {
         let auth_cert = auth.generate_and_save_auth_cert(time_now);
 
         let mut network_id_xdr = auth.network_id().to_xdr();
-        let mut pub_key = auth.keypair.get_public();
+        let pub_key = auth.keypair.get_public();
         assert!(verify_remote_auth_cert(
             time_now,
             pub_key,
@@ -351,7 +355,6 @@ mod test {
 
     #[test]
     fn mac_test() {
-
         fn data_message() -> Vec<u8> {
             let mut peer_sequence = 10u64.to_xdr();
 
@@ -380,27 +383,26 @@ mod test {
 
         let recv_mac_key = {
             let remote_pub_key = PublicKey::from_binary(peer_auth.pub_key_ecdh.key);
-            let shared_key = con_auth.generate_and_save_shared_key(&remote_pub_key,true);
+            let shared_key = con_auth.generate_and_save_shared_key(&remote_pub_key, true);
 
-            create_receiving_mac_key(&shared_key,our_nonce,peer_nonce,true)
+            create_receiving_mac_key(&shared_key, our_nonce, peer_nonce, true)
         };
 
         let peer_sending_mac_key = {
             let remote_pub_key = PublicKey::from_binary(con_auth.pub_key_ecdh.key);
-            let shared_key = peer_auth.generate_and_save_shared_key(&remote_pub_key,false);
+            let shared_key = peer_auth.generate_and_save_shared_key(&remote_pub_key, false);
 
-            create_sending_mac_key(&shared_key,peer_nonce,our_nonce,false)
+            create_sending_mac_key(&shared_key, peer_nonce, our_nonce, false)
         };
 
-        let mut mac_peer_uses_to_send_us_msg =
-            create_sha256_hmac(&data_message(),&peer_sending_mac_key.mac);
+        let mac_peer_uses_to_send_us_msg =
+            create_sha256_hmac(&data_message(), &peer_sending_mac_key.mac);
 
-        assert!(
-            verify_hmac(
-                &data_message(),
-                &recv_mac_key.mac,
-                &mac_peer_uses_to_send_us_msg.mac
-            ).is_ok()
-        );
+        assert!(verify_hmac(
+            &data_message(),
+            &recv_mac_key.mac,
+            &mac_peer_uses_to_send_us_msg.mac
+        )
+        .is_ok());
     }
 }

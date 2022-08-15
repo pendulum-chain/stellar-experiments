@@ -1,26 +1,22 @@
 use substrate_stellar_sdk::compound_types::LimitedString;
 
-use substrate_stellar_sdk::{PublicKey, XdrCodec};
-use substrate_stellar_sdk::types::{Auth, AuthCert, Hello, StellarMessage, Uint256};
 use crate::node::NodeInfo;
-
+use substrate_stellar_sdk::types::{Auth, AuthCert, Hello, StellarMessage, Uint256};
+use substrate_stellar_sdk::PublicKey;
 
 pub fn create_auth_message() -> StellarMessage {
-    let auth = Auth {
-        unused: 1
-    };
+    let auth = Auth { unused: 1 };
 
     StellarMessage::Auth(auth)
 }
 
-pub(crate) fn create_hello_message(
+pub fn create_hello_message(
     peer_id: PublicKey,
     nonce: Uint256,
     cert: AuthCert,
     listening_port: u32,
     node_info: &NodeInfo,
 ) -> StellarMessage {
-
     let version_str = &node_info.version_str;
     let hello = Hello {
         ledger_version: node_info.ledger_version,
@@ -30,8 +26,8 @@ pub(crate) fn create_hello_message(
         version_str: LimitedString::<100>::new(version_str.as_bytes().to_vec()).unwrap(),
         listening_port: i32::try_from(listening_port).unwrap(),
         peer_id,
-        cert ,
-        nonce
+        cert,
+        nonce,
     };
 
     StellarMessage::Hello(hello)

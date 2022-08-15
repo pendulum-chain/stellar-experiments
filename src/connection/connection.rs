@@ -1,12 +1,14 @@
 #![allow(dead_code)] //todo: remove after being tested and implemented
 
-use std::time::{SystemTime, UNIX_EPOCH};
-use substrate_stellar_sdk::{PublicKey, SecretKey, XdrCodec};
-use substrate_stellar_sdk::network::Network;
-use substrate_stellar_sdk::types::{AuthenticatedMessage, AuthenticatedMessageV0, Curve25519Public, Error as SubstrateStellarError, Hello, HmacSha256Mac, StellarMessage, Uint256};
-use crate::connection::authentication::{ConnectionAuth, verify_remote_auth_cert};
-use crate::connection::Error as ConnectionError;
+use crate::connection::authentication::{verify_remote_auth_cert, ConnectionAuth};
 use crate::connection::handshake::create_hello_message;
+use crate::connection::Error as ConnectionError;
+use std::time::{SystemTime, UNIX_EPOCH};
+use substrate_stellar_sdk::types::{
+    AuthenticatedMessage, AuthenticatedMessageV0, Curve25519Public, Hello, HmacSha256Mac,
+    StellarMessage, Uint256,
+};
+use substrate_stellar_sdk::{PublicKey, SecretKey, XdrCodec};
 
 use crate::helper::{create_sha256_hmac, generate_random_nonce};
 use crate::node::NodeInfo;
@@ -25,20 +27,13 @@ pub struct Connection {
 }
 
 impl Connection {
-    pub fn new(
-        local_node: NodeInfo,
-        keypair:SecretKey,
-        auth_cert_expiration: u64
-    ) -> Connection {
-        let mut connection_auth = ConnectionAuth::new(
-            local_node.network_id(),
-            keypair,
-            auth_cert_expiration
-        );
+    pub fn new(local_node: NodeInfo, keypair: SecretKey, auth_cert_expiration: u64) -> Connection {
+        let connection_auth =
+            ConnectionAuth::new(local_node.network_id(), keypair, auth_cert_expiration);
 
         Connection {
             local_sequence: 0,
-            local_nonce:generate_random_nonce(),
+            local_nonce: generate_random_nonce(),
             local_node,
             local_listening_port: 11625,
             remote_pub_key_ecdh: None,
@@ -46,27 +41,25 @@ impl Connection {
             remote_nonce: None,
             remote_node: None,
             sending_mac_key: None,
-            connection_auth
+            connection_auth,
         }
     }
 
     /// Returns HmacSha256Mac
     fn mac(&self, message: &StellarMessage) -> HmacSha256Mac {
-        let empty = HmacSha256Mac {
-            mac: [0; 32]
-        };
+        let empty = HmacSha256Mac { mac: [0; 32] };
 
         if self.remote_pub_key_ecdh.is_none() || self.sending_mac_key.is_none() {
             return empty;
         }
 
         match &self.sending_mac_key {
-            None => { empty }
+            None => empty,
             Some(key) => {
                 let mut buffer = self.local_sequence.to_xdr();
                 buffer.append(&mut message.to_xdr());
 
-                create_sha256_hmac(&buffer,key.as_binary())
+                create_sha256_hmac(&buffer, key.as_binary())
             }
         }
     }
@@ -77,14 +70,14 @@ impl Connection {
         let sequence = self.local_sequence;
 
         match &message {
-            StellarMessage::ErrorMsg(_) |  StellarMessage::Hello(_)=> {}
-            _ => self.local_sequence +=1
+            StellarMessage::ErrorMsg(_) | StellarMessage::Hello(_) => {}
+            _ => self.local_sequence += 1,
         }
 
         let auth_message_v0 = AuthenticatedMessageV0 {
             sequence,
             message,
-            mac
+            mac,
         };
 
         AuthenticatedMessage::V0(auth_message_v0)
@@ -105,11 +98,11 @@ impl Connection {
             self.local_nonce,
             auth_cert,
             self.local_listening_port,
-            &self.local_node
+            &self.local_node,
         )
     }
 
-    fn process_hello_message(&mut self, hello: Hello) -> Result<(),ConnectionError> {
+    fn process_hello_message(&mut self, hello: Hello) -> Result<(), ConnectionError> {
         let time_now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -117,12 +110,7 @@ impl Connection {
         let time_now = u64::try_from(time_now).unwrap();
 
         let mut network_id = self.connection_auth.network_id().to_xdr();
-        if !verify_remote_auth_cert(
-            time_now,
-            &hello.peer_id,
-            &hello.cert,
-            &mut network_id
-        ) {
+        if !verify_remote_auth_cert(time_now, &hello.peer_id, &hello.cert, &mut network_id) {
             return Err(ConnectionError::AuthCertInvalid);
         }
 
