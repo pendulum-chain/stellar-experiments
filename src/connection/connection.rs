@@ -80,15 +80,19 @@ impl Connection {
             mac,
         };
 
+        let xdr = auth_message_v0.to_xdr();
+        println!("AUTH MESSAGE: {:?}",xdr);
+
         AuthenticatedMessage::V0(auth_message_v0)
     }
 
     pub fn create_hello_message(&mut self) -> StellarMessage {
-        let time_now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_millis();
-        let time_now = u64::try_from(time_now).unwrap();
+        // let time_now = SystemTime::now()
+        //     .duration_since(UNIX_EPOCH)
+        //     .unwrap()
+        //     .as_millis();
+        // let time_now = u64::try_from(time_now).unwrap();
+        let time_now = 1660654321218;
 
         let auth_cert = self.connection_auth.generate_and_save_auth_cert(time_now);
         let peer_id = self.connection_auth.keypair().get_public();

@@ -3,6 +3,7 @@ pub mod helper;
 pub mod node;
 pub mod xdr_converter;
 
+use std::fs::read;
 pub use connection::*;
 
 use std::io::prelude::*;
@@ -42,8 +43,17 @@ fn main() -> std::io::Result<()> {
     let hello_msg = conn.create_hello_message();
     let auth_hello_msg = conn.authenticate_message(hello_msg);
     let xdr_auth_hello_msg = xdr_converter::from_authenticated_message(&auth_hello_msg).unwrap();
+    let msg = base64::encode(&xdr_auth_hello_msg);
+
+    println!("the msg: {:?}", msg);
     stream.write(&xdr_auth_hello_msg)?;
-    //stream.write(&message);
+
+    // let message = base64::decode_config(
+    //     "AAAAAAAAAAAAAAAAAAAADQAAABMAAAAVAAAAE3rDOZdUTjF10ma9AiQ5sizbFlCMARY/JuXLKj4QRal5AAAAB3YxOS4xLjAAAAAtaQAAAACvC49kGL+ELaA8UrxHu2GhTlexuH6TmfWWzwOsKR2Ek1qnkM9MOQYz10WBtVERLpD58o1kmL0IDTA12HQZoDRGAAABgqDViyoAAABAKcwdT1bffr4yiygBHu/YRPzX7K3y5T1l2Wa1dogONvdzdEDb4bB379gOkFOluXz8gwDcpaT/r3tM2tkgAma0A9V764c/DsL1Lbfx2HE0snYIlXvBRZTDklexuVmeaiYsAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+    //     base64::STANDARD
+    //         ).unwrap();
+    //
+    // stream.write(&message)?;
 
     //request a message
     // let sendmore = SendMore{num_messages: 10 };
@@ -63,6 +73,7 @@ fn main() -> std::io::Result<()> {
         let size = stream.read(&mut readbuf)?;
 
         if size > 0 {
+            println!("\n LOG --- LOG --- THE READBUF: {:?}", readbuf);
             let res = xdr_converter::to_authenticated_message(&readbuf);
             println!("value of res: {:?}", res);
         }

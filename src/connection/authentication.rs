@@ -33,9 +33,17 @@ impl ConnectionAuth {
         keypair: SecretKey,
         auth_cert_expiration: u64,
     ) -> ConnectionAuth {
-        let secret_key = rand::thread_rng().gen::<KeyAsBinary>();
+       // let secret_key = rand::thread_rng().gen::<KeyAsBinary>();
+        let secret_key = base64::decode_config(
+            "UYjITi2pKwZHi+wx4Awk0a1U6e3myVOF/vKoT6fSI4c=",
+            base64::STANDARD
+        ).unwrap().try_into().unwrap();
+
         let mut pub_key: KeyAsBinary = [0; 32];
         tweetnacl::scalarmult_base(&mut pub_key, &secret_key);
+
+        let x = base64::encode(&pub_key);
+        println!("THE PUBLIC KEY: {:?}", x);
 
         ConnectionAuth {
             keypair,
@@ -229,6 +237,8 @@ fn create_auth_cert(
     hash.update(buf);
 
     let buf = hash.finalize().to_vec();
+    println!("raw sig data: {:?}", buf);
+
     let signature: Signature = Signature::new(secret.create_signature(buf).to_vec()).unwrap();
 
     AuthCert {
@@ -290,11 +300,12 @@ mod test {
     fn create_valid_auth_cert() {
         let mut auth = mock_connection_auth();
 
-        let time_now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_millis();
-        let time_now = u64::try_from(time_now).unwrap();
+        // let time_now = SystemTime::now()
+        //     .duration_since(UNIX_EPOCH)
+        //     .unwrap()
+        //     .as_millis();
+        // let time_now = u64::try_from(time_now).unwrap();
+        let time_now = 1660653620165;
 
         let auth_cert = auth.generate_and_save_auth_cert(time_now);
 
