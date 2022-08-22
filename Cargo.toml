@@ -5,9 +5,9 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[[bin]]
-name = "main"
-path = "src/main.rs"
+#[[bin]]
+#name = "main"
+#path = "src/main.rs"
 
 
 
@@ -25,4 +25,3 @@ substrate-stellar-sdk = {git = "https://github.com/pendulum-chain/substrate-stel
 
 [features]
 default = []
-mock_data = []

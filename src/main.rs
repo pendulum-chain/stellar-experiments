@@ -46,10 +46,10 @@ fn main() -> std::io::Result<()> {
         21,
         19,
         "v19.1.0".to_string(),
-        Network::new(b"Public Global Stellar Network ; September 2015"),
+        &Network::new(b"Public Global Stellar Network ; September 2015"),
     );
 
-    let mut conn = Connection::new(node_info, secret, 0);
+    let mut conn = Connection::new(node_info, secret, 0, true);
 
     let hello_msg = conn.create_hello_message();
     let auth_hello_msg = conn.authenticate_message(hello_msg);
@@ -82,9 +82,10 @@ fn main() -> std::io::Result<()> {
             if msg_len <= readbuf.len() {
                 let data = &readbuf[4..msg_len + 4];
 
-                let res = parse_authenticated_message(data);
-
-                println!("the result: {:?}", res);
+                let res = parse_authenticated_message(data).expect("should return okay");
+                println!("stream result: {:?}", res);
+                let res = conn.handle_message(res.message);
+                println!("handle message result: {:?}", res);
             }
         }
     }

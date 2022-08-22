@@ -49,21 +49,6 @@ impl ConnectionAuth {
         }
     }
 
-    #[cfg(feature = "mock_data")]
-    pub fn new_with_key(
-        network: &BinarySha256Hash,
-        keypair: SecretKey,
-        auth_cert_expiration: u64,
-        secret_key_ecdh: &str,
-    ) -> ConnectionAuth {
-        let secret_key = base64::decode_config(secret_key_ecdh, base64::STANDARD)
-            .unwrap()
-            .try_into()
-            .unwrap();
-
-        Self::create_connection_auth(network, keypair, auth_cert_expiration, secret_key)
-    }
-
     pub fn new(
         network: &BinarySha256Hash,
         keypair: SecretKey,
@@ -74,8 +59,12 @@ impl ConnectionAuth {
         Self::create_connection_auth(network, keypair, auth_cert_expiration, secret_key)
     }
 
-    pub fn keypair(&self) -> &SecretKey {
+    pub(crate) fn keypair(&self) -> &SecretKey {
         &self.keypair
+    }
+
+    pub(crate) fn secret_key_ecdh(&self) -> &Curve25519Secret {
+        &self.secret_key_ecdh
     }
 
     pub fn pub_key_ecdh(&self) -> &Curve25519Public {
@@ -90,7 +79,7 @@ impl ConnectionAuth {
     /// Returns `none` when not found.
     pub fn shared_key(
         &self,
-        remote_pub_key: &PublicKey,
+        remote_pub_key_ecdh: &Curve25519Public,
         we_called_remote: bool,
     ) -> Option<&HmacSha256Mac> {
         let shared_keys_map = if we_called_remote {
@@ -99,44 +88,23 @@ impl ConnectionAuth {
             &self.remote_called_us_shared_keys
         };
 
-        shared_keys_map.get(remote_pub_key.as_binary())
+        shared_keys_map.get(&remote_pub_key_ecdh.key)
     }
 
-    /// Generates a new shared key, and saves it in the map.
-    pub fn generate_and_save_shared_key(
+    pub fn set_shared_key(
         &mut self,
-        remote_pub_key: &PublicKey,
+        remote_pub_key_ecdh: &Curve25519Public,
+        shared_key: HmacSha256Mac,
         we_called_remote: bool,
-    ) -> HmacSha256Mac {
-        // prepare the buffers
-        let mut final_buffer: Vec<u8> = vec![];
-        let mut buffer: [u8; 32] = [0; 32];
-
-        let remote_pub_key_bin = remote_pub_key.as_binary();
-        tweetnacl::scalarmult(&mut buffer, &self.secret_key_ecdh.key, remote_pub_key_bin);
-
-        final_buffer.extend_from_slice(&buffer);
-        if we_called_remote {
-            final_buffer.extend_from_slice(&self.pub_key_ecdh.key);
-            final_buffer.extend_from_slice(remote_pub_key_bin);
-        } else {
-            final_buffer.extend_from_slice(remote_pub_key_bin);
-            final_buffer.extend_from_slice(&self.pub_key_ecdh.key);
-        }
-
-        // create hmac
-        let shared_key = create_sha256_hmac(&final_buffer, &[0; 32]);
-
+    ) {
         // save the hmac
         if we_called_remote {
             self.we_called_remote_shared_keys
-                .insert(*remote_pub_key_bin, shared_key.clone());
+                .insert(remote_pub_key_ecdh.key, shared_key);
         } else {
             self.remote_called_us_shared_keys
-                .insert(*remote_pub_key_bin, shared_key.clone());
+                .insert(remote_pub_key_ecdh.key, shared_key);
         };
-
-        shared_key
     }
 
     ///  Returns none if the validity start date exceeds the expiration
@@ -156,37 +124,34 @@ impl ConnectionAuth {
         }
     }
 
-    /// Generates a new auth cert, and saves it in the map.
-    pub fn generate_and_save_auth_cert(&mut self, valid_at: u64) -> AuthCert {
-        let mut network_id_xdr = self.network_hash.to_xdr();
-        self.auth_cert_expiration = valid_at + AUTH_CERT_EXPIRATION_LIMIT;
-
-        let auth_cert = create_auth_cert(
-            self.auth_cert_expiration,
-            &mut network_id_xdr,
-            self.pub_key_ecdh.clone(),
-            &self.keypair,
-        );
-
-        self.auth_cert = Some(auth_cert.clone());
-        auth_cert
+    pub fn set_auth_cert(&mut self, auth_cert: AuthCert) {
+        self.auth_cert_expiration = auth_cert.expiration;
+        self.auth_cert = Some(auth_cert);
     }
 }
 
-fn create_mac_key(
-    shared_key: &HmacSha256Mac,
-    local_nonce: Uint256,
-    remote_nonce: Uint256,
-    mut buf: Vec<u8>,
+pub fn gen_shared_key(
+    remote_pub_key_ecdh: &Curve25519Public,
+    secret_key_ecdh: &Curve25519Secret,
+    pub_key_ecdh: &Curve25519Public,
+    we_called_remote: bool,
 ) -> HmacSha256Mac {
-    let mut local_n = local_nonce.to_vec();
-    let mut remote_n = remote_nonce.to_vec();
+    // prepare the buffers
+    let mut final_buffer: Vec<u8> = vec![];
+    let mut buffer: [u8; 32] = [0; 32];
 
-    buf.append(&mut local_n);
-    buf.append(&mut remote_n);
-    buf.append(&mut vec![1]);
+    tweetnacl::scalarmult(&mut buffer, &secret_key_ecdh.key, &remote_pub_key_ecdh.key);
 
-    create_sha256_hmac(&buf, &shared_key.mac)
+    final_buffer.extend_from_slice(&buffer);
+    if we_called_remote {
+        final_buffer.extend_from_slice(&pub_key_ecdh.key);
+        final_buffer.extend_from_slice(&remote_pub_key_ecdh.key);
+    } else {
+        final_buffer.extend_from_slice(&remote_pub_key_ecdh.key);
+        final_buffer.extend_from_slice(&pub_key_ecdh.key);
+    }
+
+    create_sha256_hmac(&final_buffer, &[0; 32])
 }
 
 pub fn create_sending_mac_key(
@@ -237,15 +202,18 @@ pub fn create_receiving_mac_key(
     create_sha256_hmac(&buf, &shared_key.mac)
 }
 
-fn create_auth_cert(
-    expiration: u64,
-    network_id_xdr: &mut Vec<u8>,
+pub fn create_auth_cert(
+    network_id: &BinarySha256Hash,
+    keypair: &SecretKey,
+    valid_at: u64,
     pub_key_ecdh: Curve25519Public,
-    secret: &SecretKey,
 ) -> AuthCert {
+    let mut network_id_xdr = network_id.to_xdr();
+    let expiration = valid_at + AUTH_CERT_EXPIRATION_LIMIT;
+
     let mut buf: Vec<u8> = vec![];
 
-    buf.append(network_id_xdr);
+    buf.append(&mut network_id_xdr);
     buf.append(&mut EnvelopeType::EnvelopeTypeAuth.to_xdr());
     buf.append(&mut expiration.to_xdr());
     buf.append(&mut pub_key_ecdh.key.to_vec());
@@ -256,7 +224,7 @@ fn create_auth_cert(
     let sha256RawSigData = hash.finalize().to_vec();
 
     let signature: Signature =
-        Signature::new(secret.create_signature(sha256RawSigData).to_vec()).unwrap();
+        Signature::new(keypair.create_signature(sha256RawSigData).to_vec()).unwrap();
 
     AuthCert {
         pubkey: pub_key_ecdh,
@@ -294,14 +262,16 @@ pub fn verify_remote_auth_cert(
 #[cfg(test)]
 mod test {
     use crate::connection::authentication::{
-        create_receiving_mac_key, create_sending_mac_key, verify_remote_auth_cert, ConnectionAuth,
-        AUTH_CERT_EXPIRATION_LIMIT,
+        create_receiving_mac_key, create_sending_mac_key, gen_shared_key, verify_remote_auth_cert,
+        ConnectionAuth, AUTH_CERT_EXPIRATION_LIMIT,
     };
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use crate::connection::Error;
+    use crate::create_auth_cert;
     use crate::helper::{create_sha256_hmac, generate_random_nonce, verify_hmac};
     use substrate_stellar_sdk::network::Network;
+    use substrate_stellar_sdk::types::Curve25519Public;
     use substrate_stellar_sdk::{PublicKey, SecretKey, XdrCodec};
 
     fn mock_connection_auth() -> ConnectionAuth {
@@ -322,7 +292,14 @@ mod test {
             .as_millis();
         let time_now = u64::try_from(time_now).unwrap();
 
-        let auth_cert = auth.generate_and_save_auth_cert(time_now);
+        let auth_cert = create_auth_cert(
+            auth.network_id(),
+            auth.keypair(),
+            time_now,
+            auth.pub_key_ecdh.clone(),
+        );
+
+        auth.set_auth_cert(auth_cert.clone());
 
         let mut network_id_xdr = auth.network_id().to_xdr();
         let pub_key = auth.keypair.get_public();
@@ -345,11 +322,19 @@ mod test {
 
         assert_eq!(auth.auth_cert(time_now), Err(Error::AuthCertNotFound));
 
-        let new_auth = auth.generate_and_save_auth_cert(time_now);
+        let new_auth_cert = create_auth_cert(
+            auth.network_id(),
+            auth.keypair(),
+            time_now,
+            auth.pub_key_ecdh.clone(),
+        );
+
+        auth.set_auth_cert(new_auth_cert.clone());
+
         let auth_inside_valid_range = auth
             .auth_cert(time_now + 1)
             .expect("should return an auth cert");
-        assert_eq!(&new_auth, auth_inside_valid_range);
+        assert_eq!(&new_auth_cert, auth_inside_valid_range);
 
         // expired
         let new_time = time_now + (AUTH_CERT_EXPIRATION_LIMIT / 2) + 100;
@@ -358,6 +343,7 @@ mod test {
 
     #[test]
     fn create_valid_shared_key() {
+        let we_called_remote = true;
         let public_network = Network::new(b"Public Global Stellar Network ; September 2015");
         let secret =
             SecretKey::from_encoding("SCV6Q3VU4S52KVNJOFXWTHFUPHUKVYK3UV2ISGRLIUH54UGC6OPZVK2D")
@@ -370,11 +356,20 @@ mod test {
             base64::STANDARD,
         )
         .unwrap();
-        let remote_pub_key = PublicKey::from_binary(bytes.try_into().unwrap());
+        let remote_pub_key = Curve25519Public {
+            key: bytes.try_into().unwrap(),
+        };
 
-        assert!(auth.shared_key(&remote_pub_key, true).is_none());
+        assert!(auth.shared_key(&remote_pub_key, we_called_remote).is_none());
 
-        let shared_key = auth.generate_and_save_shared_key(&remote_pub_key, true);
+        let shared_key = gen_shared_key(
+            &remote_pub_key,
+            &auth.secret_key_ecdh,
+            &auth.pub_key_ecdh,
+            we_called_remote,
+        );
+
+        auth.set_shared_key(&remote_pub_key, shared_key.clone(), we_called_remote);
 
         assert_eq!(auth.shared_key(&remote_pub_key, true), Some(&shared_key));
     }
@@ -408,15 +403,35 @@ mod test {
         let peer_nonce = generate_random_nonce();
 
         let recv_mac_key = {
-            let remote_pub_key = PublicKey::from_binary(peer_auth.pub_key_ecdh.key);
-            let shared_key = con_auth.generate_and_save_shared_key(&remote_pub_key, true);
+            let remote_pub_key = Curve25519Public {
+                key: peer_auth.pub_key_ecdh.key,
+            };
+
+            let shared_key = gen_shared_key(
+                &remote_pub_key,
+                &con_auth.secret_key_ecdh,
+                &con_auth.pub_key_ecdh,
+                true,
+            );
+
+            con_auth.set_shared_key(&remote_pub_key, shared_key.clone(), true);
 
             create_receiving_mac_key(&shared_key, our_nonce, peer_nonce, true)
         };
 
         let peer_sending_mac_key = {
-            let remote_pub_key = PublicKey::from_binary(con_auth.pub_key_ecdh.key);
-            let shared_key = peer_auth.generate_and_save_shared_key(&remote_pub_key, false);
+            let remote_pub_key = Curve25519Public {
+                key: con_auth.pub_key_ecdh.key,
+            };
+
+            let shared_key = gen_shared_key(
+                &remote_pub_key,
+                &peer_auth.secret_key_ecdh,
+                &peer_auth.pub_key_ecdh,
+                false,
+            );
+
+            peer_auth.set_shared_key(&remote_pub_key, shared_key.clone(), false);
 
             create_sending_mac_key(&shared_key, peer_nonce, our_nonce, false)
         };

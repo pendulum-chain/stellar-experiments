@@ -6,4 +6,5 @@ pub enum Error {
     AuthCertNotFound,
     AuthCertInvalid,
     HmacError(hmac::digest::MacError),
+    Undefined(String),
 }
