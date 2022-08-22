@@ -3,14 +3,15 @@ pub mod helper;
 pub mod node;
 pub mod xdr_converter;
 
-use std::fs::read;
 pub use connection::*;
+use std::fs::read;
 
 use std::io::prelude::*;
 use std::net::TcpStream;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::node::NodeInfo;
+use crate::xdr_converter::{get_message_length, parse_authenticated_message};
 use hmac::Hmac;
 use stellar::compound_types::LimitedString;
 use stellar::types::{
@@ -20,9 +21,19 @@ use stellar::types::{
 use stellar::{Curve25519Secret, PublicKey, XdrCodec};
 use substrate_stellar_sdk as stellar;
 use substrate_stellar_sdk::network::Network;
+use substrate_stellar_sdk::SecretKey;
+
+pub struct Config {
+    secret_key: SecretKey,
+    secret_key_ecdh: String,
+    auth_time: u64,
+    connection_local_nonce: String,
+    node_info: NodeInfo,
+}
 
 fn main() -> std::io::Result<()> {
-    let addr = "139.59.221.81:11625";
+    let addr = "135.181.16.110:11625";
+    // let addr = "135.181.16.110:11625";
     let mut stream = TcpStream::connect(addr)?;
 
     let secret = stellar::SecretKey::from_encoding(
@@ -45,15 +56,7 @@ fn main() -> std::io::Result<()> {
     let xdr_auth_hello_msg = xdr_converter::from_authenticated_message(&auth_hello_msg).unwrap();
     let msg = base64::encode(&xdr_auth_hello_msg);
 
-    println!("the msg: {:?}", msg);
     stream.write(&xdr_auth_hello_msg)?;
-
-    // let message = base64::decode_config(
-    //     "AAAAAAAAAAAAAAAAAAAADQAAABMAAAAVAAAAE3rDOZdUTjF10ma9AiQ5sizbFlCMARY/JuXLKj4QRal5AAAAB3YxOS4xLjAAAAAtaQAAAACvC49kGL+ELaA8UrxHu2GhTlexuH6TmfWWzwOsKR2Ek1qnkM9MOQYz10WBtVERLpD58o1kmL0IDTA12HQZoDRGAAABgqDViyoAAABAKcwdT1bffr4yiygBHu/YRPzX7K3y5T1l2Wa1dogONvdzdEDb4bB379gOkFOluXz8gwDcpaT/r3tM2tkgAma0A9V764c/DsL1Lbfx2HE0snYIlXvBRZTDklexuVmeaiYsAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
-    //     base64::STANDARD
-    //         ).unwrap();
-    //
-    // stream.write(&message)?;
 
     //request a message
     // let sendmore = SendMore{num_messages: 10 };
@@ -68,14 +71,21 @@ fn main() -> std::io::Result<()> {
     // stream.write(&buf)?;
 
     //read loop
-    let mut readbuf = [0; 128];
+    let mut readbuf = [0; 1024];
     loop {
         let size = stream.read(&mut readbuf)?;
 
         if size > 0 {
-            println!("\n LOG --- LOG --- THE READBUF: {:?}", readbuf);
-            let res = xdr_converter::to_authenticated_message(&readbuf);
-            println!("value of res: {:?}", res);
+            let msg_len = get_message_length(&readbuf);
+            let msg_len = usize::try_from(msg_len).unwrap();
+
+            if msg_len <= readbuf.len() {
+                let data = &readbuf[4..msg_len + 4];
+
+                let res = parse_authenticated_message(data);
+
+                println!("the result: {:?}", res);
+            }
         }
     }
 }

@@ -27,6 +27,35 @@ pub struct Connection {
 }
 
 impl Connection {
+    #[cfg(feature = "mock_data")]
+    pub fn new_mock(
+        local_node: NodeInfo,
+        keypair: SecretKey,
+        auth_cert_expiration: u64,
+        local_nonce: Uint256,
+        secret_key_ecdh: &str,
+    ) -> Connection {
+        let connection_auth = ConnectionAuth::new_with_key(
+            local_node.network_id(),
+            keypair,
+            auth_cert_expiration,
+            secret_key_ecdh,
+        );
+
+        Connection {
+            local_sequence: 0,
+            local_nonce,
+            local_node,
+            local_listening_port: 11625,
+            remote_pub_key_ecdh: None,
+            remote_pub_key: None,
+            remote_nonce: None,
+            remote_node: None,
+            sending_mac_key: None,
+            connection_auth,
+        }
+    }
+
     pub fn new(local_node: NodeInfo, keypair: SecretKey, auth_cert_expiration: u64) -> Connection {
         let connection_auth =
             ConnectionAuth::new(local_node.network_id(), keypair, auth_cert_expiration);
@@ -80,21 +109,11 @@ impl Connection {
             mac,
         };
 
-        let xdr = auth_message_v0.to_xdr();
-        println!("AUTH MESSAGE: {:?}",xdr);
-
         AuthenticatedMessage::V0(auth_message_v0)
     }
 
-    pub fn create_hello_message(&mut self) -> StellarMessage {
-        // let time_now = SystemTime::now()
-        //     .duration_since(UNIX_EPOCH)
-        //     .unwrap()
-        //     .as_millis();
-        // let time_now = u64::try_from(time_now).unwrap();
-        let time_now = 1660654321218;
-
-        let auth_cert = self.connection_auth.generate_and_save_auth_cert(time_now);
+    fn _create_hello_message(&mut self, valid_at: u64) -> StellarMessage {
+        let auth_cert = self.connection_auth.generate_and_save_auth_cert(valid_at);
         let peer_id = self.connection_auth.keypair().get_public();
 
         create_hello_message(
@@ -104,6 +123,21 @@ impl Connection {
             self.local_listening_port,
             &self.local_node,
         )
+    }
+
+    #[cfg(feature = "mock_data")]
+    pub fn create_hello_message_mock_time(&mut self, valid_at: u64) -> StellarMessage {
+        self._create_hello_message(valid_at)
+    }
+
+    pub fn create_hello_message(&mut self) -> StellarMessage {
+        let time_now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis();
+        let time_now = u64::try_from(time_now).unwrap();
+
+        self._create_hello_message(time_now)
     }
 
     fn process_hello_message(&mut self, hello: Hello) -> Result<(), ConnectionError> {

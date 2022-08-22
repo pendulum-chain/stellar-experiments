@@ -35,7 +35,6 @@ pub fn generate_random_nonce() -> Uint256 {
     let mut rng = rand::thread_rng();
     let random_float = rng.gen_range(0.00..1.00);
     let mut hash = Sha256::new();
-    //hash.update(random_float.to_string());
-    hash.update("0.7532384580760465848".to_string());
+    hash.update(random_float.to_string());
     hash.finalize().to_vec().try_into().unwrap()
 }
