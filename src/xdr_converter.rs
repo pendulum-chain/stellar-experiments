@@ -34,6 +34,9 @@ pub fn parse_authenticated_message(xdr_message: &[u8]) -> Result<AuthenticatedMe
         return Err(Error::UnsupportedMessageVersion);
     }
 
+    let msg_type = parse_message_type(&xdr_message[12..16])?;
+    println!("message type: {:?}", msg_type);
+
     Ok(AuthenticatedMessageV0 {
         sequence: parse_sequence(&xdr_message[4..12])?,
         message: parse_stellar_message(&xdr_message[12..(xdr_msg_len - 32)])?,
@@ -71,6 +74,10 @@ fn parse_sequence(xdr_message: &[u8]) -> Result<u64, Error> {
 
 fn parse_hmac(xdr_message: &[u8]) -> Result<HmacSha256Mac, Error> {
     HmacSha256Mac::from_xdr(xdr_message).map_err(|e| log_decode_error("Hmac", e))
+}
+
+fn parse_message_type(xdr_message: &[u8]) -> Result<MessageType,Error> {
+    MessageType::from_xdr(&xdr_message).map_err(|e| log_decode_error("Message Type",e))
 }
 
 /// Returns XDR format of the message or

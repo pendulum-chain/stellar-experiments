@@ -12,6 +12,8 @@ pub enum Error {
     WriteFailed(String),
     ReadFailed(String),
     NoResponse, // No data left in the buffer
+    InvalidSequenceNumber,
+    InvalidHmac,
 
     HmacError(hmac::digest::MacError),
     Undefined(String),

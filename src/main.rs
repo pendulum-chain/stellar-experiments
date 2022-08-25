@@ -58,11 +58,11 @@ fn main() -> std::io::Result<()> {
     "135.181.16.110:11625"
     ).expect("SHOULD WORK!");
 
-    conn.send_hello_message().expect("hoooy should be ok!!");
+    conn.start().expect("hoooy should be ok!!");
 
     let msg =  StellarMessage::GetScpState(20);
     conn.send_stellar_message(msg).expect("SHOULD SEND THE GETSCPSTATE!!!");
-    conn.process_next_message().expect("OH COME ON, RESPONSE!!!");
+    conn.read_response().expect("OH COME ON, RESPONSE!!!");
 
     Ok(())
 

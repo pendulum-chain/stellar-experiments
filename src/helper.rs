@@ -23,7 +23,7 @@ pub fn create_sha256_hmac(data_buffer: &[u8], mac_key_buffer: &Buffer) -> HmacSh
     }
 }
 
-pub fn verify_hmac(data_buffer: &[u8], mac_key_buffer: &Buffer, mac: &Buffer) -> Result<(), Error> {
+pub fn verify_hmac(data_buffer: &[u8], mac_key_buffer: &Buffer, mac: &[u8]) -> Result<(), Error> {
     let mut hmac = HmacSha256::new_from_slice(mac_key_buffer).unwrap();
     hmac.update(data_buffer);
 

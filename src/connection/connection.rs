@@ -11,8 +11,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use substrate_stellar_sdk::types::{AuthCert, AuthenticatedMessage, AuthenticatedMessageV0, Curve25519Public, Hello, HmacSha256Mac, SendMore, StellarMessage, Uint256};
 use substrate_stellar_sdk::{PublicKey, SecretKey, XdrCodec};
 
-use crate::helper::{create_sha256_hmac, generate_random_nonce};
+use crate::helper::{create_sha256_hmac, generate_random_nonce, verify_hmac};
 use crate::node::NodeInfo;
+use crate::ReadState::ReadNotStarted;
 
 
 // state machine? or actor?
@@ -21,20 +22,24 @@ pub struct Connection {
     pub local_nonce: Uint256,
     pub local_node: NodeInfo,
     pub local_listening_port: u32,
+
+    pub remote_sequence: u64,
     pub remote_pub_key_ecdh: Option<Curve25519Public>,
     pub remote_pub_key: Option<PublicKey>,
     pub remote_nonce: Option<Uint256>,
     pub remote_node: Option<NodeInfo>,
     pub sending_mac_key: Option<HmacSha256Mac>,
     pub receiving_mac_key: Option<HmacSha256Mac>,
+
     connection_auth: ConnectionAuth,
-    remote_called_us: bool,
-    stream: TcpStream,
-    
-    
-    
     read_state:ReadState,
-    handshake_state: HandshakeState
+    handshake_state: HandshakeState,
+
+    stream: TcpStream,
+
+    remote_called_us: bool,
+    receiveTransactionMessages: bool,
+    receiveSCPMessages: bool
 }
 
 impl Connection {
@@ -57,6 +62,7 @@ impl Connection {
             local_nonce: generate_random_nonce(),
             local_node,
             local_listening_port: 11625,
+            remote_sequence: 0,
             remote_pub_key_ecdh: None,
             remote_pub_key: None,
             remote_nonce: None,
@@ -64,11 +70,15 @@ impl Connection {
             sending_mac_key: None,
             receiving_mac_key: None,
             connection_auth,
-            remote_called_us,
-            stream,
             read_state: ReadState::ReadNotStarted,
-            handshake_state: HandshakeState::Connecting
-        })
+            handshake_state: HandshakeState::Connecting,
+            stream,
+            remote_called_us,
+            receiveTransactionMessages: true,
+            receiveSCPMessages: true
+        }
+
+        )
     }
 
     /// Returns HmacSha256Mac
@@ -116,85 +126,61 @@ impl Connection {
         let write_size = self.stream.write(&xdr_authenticated_msg).map_err(|e| {
             Error::WriteFailed(e.to_string())
         })?;
-        println!("writing message with size {:?}", write_size);
-
         Ok(())
 
     }
 
-
-    fn read_response(&mut self) -> Result<(),Error> {
+    pub fn read_response(&mut self) -> Result<(),Error> {
         let mut readbuf = [0;1024];
 
         let mut read_size = self.stream.read(&mut readbuf).map_err(|e| Error::ReadFailed(e.to_string()))?;
-        loop {
-            // If size bytes are not available to be read, null will be returned unless
-            // the stream has ended, in which case all of the data
-            // remaining in the internal buffer will be returned.
-            if self.read_state == ReadState::ReadNotStarted && read_size > 0 {
+        //loop {
+            if read_size > 0 {
+                // If size bytes are not available to be read, null will be returned unless
+                // the stream has ended, in which case all of the data
+                // remaining in the internal buffer will be returned.
+
                 let message_len = get_message_length(&readbuf);
                 let message_len = usize::try_from(message_len).unwrap();
 
                 if message_len > readbuf.len() {
                     return Err(Error::ReadFailed("Not enough buffer".to_string()));
                 }
-                self.read_state = ReadState::ReadyForMessage;
+                // self.read_state = ReadState::ReadyForMessage;
+                // println!("update read_state to ReadyForMessage");
 
-                let data = &readbuf[4..message_len + 4];
-                let data = parse_authenticated_message(data)?;
 
-                if self.handshake_state >= HandshakeState::GotHello {
-                    //todo: verify authentication
-                }
+                //if self.read_state == ReadState::ReadyForMessage {
+                    let data = &readbuf[4..message_len + 4];
+                    self.process_next_message(data).map_err(|e| {
+                        //self.read_state = ReadState::Blocked;
+                        println!("update read_state to Block");
+                        e
+                    })?;
+                    //self.read_state = ReadState::ReadNotStarted;
+                    println!("update read_state to ReadNotStarted");
 
-                self.handle_message(data.message)?;
-
-                println!("  READ-SIZE: {}, message-len: {}", read_size, message_len);
-                read_size = read_size.saturating_sub(message_len + 4);
-
-            } else {
-                break;
+                    read_size = read_size.saturating_sub(message_len + 4);
+                //}
             }
-        }
+      //  }
+
         Ok(())
     }
 
     // todo: time out if response is taking too much time
-    pub fn process_next_message(&mut self) -> Result<(),Error> {
-        let mut readbuf = [0;1024];
+    fn process_next_message(&mut self, data: &[u8]) -> Result<(),Error> {
 
-        let mut read_size = self.stream.read(&mut readbuf).map_err(|e| Error::ReadFailed(e.to_string()))?;
-        loop {
-            // If size bytes are not available to be read, null will be returned unless
-            // the stream has ended, in which case all of the data
-            // remaining in the internal buffer will be returned.
-            if self.read_state == ReadState::ReadNotStarted && read_size > 0 {
-                let message_len = get_message_length(&readbuf);
-                let message_len = usize::try_from(message_len).unwrap();
+        let auth_msg = parse_authenticated_message(data)?;
 
-                if message_len > readbuf.len() {
-                    return Err(Error::ReadFailed("Not enough buffer".to_string()));
-                }
-                self.read_state = ReadState::ReadyForMessage;
-                println!("update read_state to ReadyForMessage");
-
-                let data = &readbuf[4..message_len + 4];
-                let data = parse_authenticated_message(data)?;
-
-                if self.handshake_state >= HandshakeState::GotHello {
-                    //todo: verify authentication
-                    println!("todo: verify authentication");
-                }
-
-                self.handle_message(data.message)?;
-
-                println!("  READ-SIZE: {}, message-len: {}", read_size, message_len);
-                read_size = read_size.saturating_sub(message_len + 4);
-
-            } else {
-                break;
+            println!("handshake state: {:?}", self.handshake_state);
+            if self.handshake_state >= HandshakeState::GotHello {
+                let body = &data[4..(&data.len() -32)];
+                println!("length of data: {:?}", &body.len());
+                self.verify_auth(&auth_msg,body)?;
             }
-        }
+
+            self.handle_message(auth_msg.message)?;
 
         // response consumed already
         Ok(())
@@ -205,8 +191,8 @@ impl Connection {
             self.send_auth_message()?;
         }
 
-        self.handshake_state =HandshakeState::Completed;
-        println!("updated handshake_state to Completed ");
+        self.handshake_state = HandshakeState::Completed;
+        println!("fn complete_handshake:: HandshakeState Completed...");
         self.send_sendMore_message()
     }
 
@@ -217,16 +203,17 @@ impl Connection {
             StellarMessage::Hello(hello) => {
                 self.process_hello_message(hello)?;
 
+                self.handshake_state = HandshakeState::GotHello;
+
                 if self.remote_called_us {
                     self.send_hello_message()?;
                 } else {
                     self.send_auth_message()?;
-                    println!("Auth message sent");
                 }
                 println!("Done sending hello message.");
-                println!("update handshake_state to GotHello");
-                self.handshake_state = HandshakeState::GotHello;
+                println!("fn handle_message:: HandshakeState GotHello");
             }
+
             StellarMessage::Auth(_) => {
                 self.complete_handshake()?
             }
@@ -280,7 +267,13 @@ impl Connection {
         )
     }
 
-    pub fn send_hello_message(&mut self) -> Result<(),Error> {
+    pub fn start(&mut self) -> Result<(),Error> {
+        self.handshake_state = HandshakeState::Connecting;
+        println!("fn start:: HandshakeState Connecting...");
+        self.send_hello_message()
+    }
+
+    fn send_hello_message(&mut self) -> Result<(),Error> {
         let time_now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -291,21 +284,20 @@ impl Connection {
         self.send_stellar_message(hello)?;
 
         // should receive a response immediately
-        self.process_next_message()
+        self.read_response()
     }
 
     fn send_auth_message(&mut self) -> Result<(),Error> {
         println!("SENDING AUTH MESSAGE: ");
         let msg = create_auth_message();
         self.send_stellar_message(msg)?;
-        self.process_next_message()
+        self.read_response()
     }
 
     fn send_sendMore_message(&mut self) -> Result<(),Error> {
-        println!("SENDING SENDMORE MESSAGE");
-        let msg = StellarMessage::SendMore(SendMore{ num_messages: 0 });
+        let msg = StellarMessage::SendMore(SendMore{ num_messages: 10 });
         self.send_stellar_message(msg)?;
-        self.process_next_message()
+        self.read_response()
     }
 
     fn update_remote_info(&mut self, hello: &Hello) {
@@ -399,4 +391,28 @@ impl Connection {
 
         Ok(())
     }
+
+    fn verify_auth(&self, auth_msg: &AuthenticatedMessageV0, body:&[u8]) -> Result<(),Error> {
+        if self.remote_sequence == auth_msg.sequence {
+            //must be handled on main thread because workers could mix up order of messages.
+            return Err(Error::InvalidSequenceNumber);
+        }
+
+        if let Some(recv_mac_key) = &self.receiving_mac_key {
+            verify_hmac(&auth_msg.mac.mac,&recv_mac_key.mac,body)
+                .map_err(|_| Error::InvalidHmac)?;
+        }
+
+        println!("auth verified!");
+        Ok(())
+    }
 }
+
+
+// 1. is this library?
+// 2. if this is a library, should it be async? actor, state machine?
+
+
+// pub funcs:
+// 1. send_stellar_message
+// 2. todo: read_response: return a human-readable response : that message type and

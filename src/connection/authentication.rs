@@ -128,7 +128,6 @@ impl ConnectionAuth {
         self.auth_cert_expiration = auth_cert.expiration;
         self.auth_cert = Some(auth_cert);
     }
-
 }
 
 pub fn gen_shared_key(
