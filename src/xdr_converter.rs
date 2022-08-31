@@ -26,7 +26,7 @@ pub fn from_authenticated_message(message: &AuthenticatedMessage) -> Result<Vec<
     message_to_bytes(message)
 }
 
-pub fn parse_authenticated_message(xdr_message: &[u8]) -> Result<AuthenticatedMessageV0, Error> {
+pub fn parse_authenticated_message(xdr_message: &[u8]) -> Result<(AuthenticatedMessageV0,MessageType), Error> {
     let xdr_msg_len = xdr_message.len();
 
     let msg_vers = parse_message_version(&xdr_message[0..4])?;
@@ -35,13 +35,15 @@ pub fn parse_authenticated_message(xdr_message: &[u8]) -> Result<AuthenticatedMe
     }
 
     let msg_type = parse_message_type(&xdr_message[12..16])?;
-    println!("message type: {:?}", msg_type);
 
-    Ok(AuthenticatedMessageV0 {
-        sequence: parse_sequence(&xdr_message[4..12])?,
-        message: parse_stellar_message(&xdr_message[12..(xdr_msg_len - 32)])?,
-        mac: parse_hmac(&xdr_message[(xdr_msg_len - 32)..xdr_msg_len])?,
-    })
+    Ok((
+        AuthenticatedMessageV0 {
+            sequence: parse_sequence(&xdr_message[4..12])?,
+            message: parse_stellar_message(&xdr_message[12..(xdr_msg_len - 32)])?,
+            mac: parse_hmac(&xdr_message[(xdr_msg_len - 32)..xdr_msg_len])?,
+        },
+        msg_type
+    ))
 }
 
 pub fn get_message_length(data: &[u8]) -> u32 {

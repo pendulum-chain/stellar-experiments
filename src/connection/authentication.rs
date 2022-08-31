@@ -175,6 +175,8 @@ pub fn create_sending_mac_key(
     buf.append(&mut remote_n);
     buf.append(&mut vec![1]);
 
+
+
     create_sha256_hmac(&buf, &shared_key.mac)
 }
 
@@ -440,9 +442,9 @@ mod test {
             create_sha256_hmac(&data_message(), &peer_sending_mac_key.mac);
 
         assert!(verify_hmac(
-            &data_message(),
-            &recv_mac_key.mac,
-            &mac_peer_uses_to_send_us_msg.mac
+            &data_message(), // 3
+            &recv_mac_key.mac, // 2
+            &mac_peer_uses_to_send_us_msg.mac // 1
         )
         .is_ok());
     }

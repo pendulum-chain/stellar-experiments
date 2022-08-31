@@ -60,9 +60,20 @@ fn main() -> std::io::Result<()> {
 
     conn.start().expect("hoooy should be ok!!");
 
-    let msg =  StellarMessage::GetScpState(20);
-    conn.send_stellar_message(msg).expect("SHOULD SEND THE GETSCPSTATE!!!");
-    conn.read_response().expect("OH COME ON, RESPONSE!!!");
+    // let msg =  StellarMessage::GetScpState(20);
+    // conn.send_stellar_message(msg).expect("SHOULD SEND THE GETSCPSTATE!!!");
+    // conn.read_response().expect("OH COME ON, RESPONSE!!!");
+
+    // loop {
+    //     println!("--------main call: ----------");
+    //     match conn.read_response() {
+    //         Ok(_) =>{}
+    //         Err(e) => {
+    //             println!("ang error: {:?}",e);
+    //             break;
+    //         }
+    //     }
+    // }
 
     Ok(())
 
