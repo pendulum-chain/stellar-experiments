@@ -32,9 +32,9 @@ pub struct Config {
 }
 
 fn main() -> std::io::Result<()> {
-    let addr = "135.181.16.110:11625";
     // let addr = "135.181.16.110:11625";
-    let mut stream = TcpStream::connect(addr)?;
+    // // let addr = "135.181.16.110:11625";
+    // let mut stream = TcpStream::connect(addr)?;
 
     let secret = stellar::SecretKey::from_encoding(
         "SBLI7RKEJAEFGLZUBSCOFJHQBPFYIIPLBCKN7WVCWT4NEG2UJEW33N73",

@@ -59,11 +59,11 @@ impl ConnectionAuth {
         Self::create_connection_auth(network, keypair, auth_cert_expiration, secret_key)
     }
 
-    pub(crate) fn keypair(&self) -> &SecretKey {
+    pub fn keypair(&self) -> &SecretKey {
         &self.keypair
     }
 
-    pub(crate) fn secret_key_ecdh(&self) -> &Curve25519Secret {
+    pub fn secret_key_ecdh(&self) -> &Curve25519Secret {
         &self.secret_key_ecdh
     }
 

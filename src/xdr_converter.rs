@@ -8,10 +8,18 @@ use substrate_stellar_sdk::types::{
 use substrate_stellar_sdk::{SecretKey, XdrCodec};
 use thiserror::Error;
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, err_derive::Error)]
 pub enum Error {
+
+    #[error(display = "Data more than the max of U32")]
     UsizeToU32ExceedMax,
+
+
+    #[error(display = "Message Version: Unsupported")]
     UnsupportedMessageVersion,
+
+
+    #[error(display = "Decode Error: {}", _0)]
     DecodeError(String),
 }
 
@@ -56,6 +64,7 @@ pub fn get_message_length(data: &[u8]) -> u32 {
 
     u32::from_be_bytes(message_len.try_into().unwrap())
 }
+
 
 fn log_decode_error<T: Debug>(source: &str, error: T) -> Error {
     println!("Decode Error of {}: {:?}", source, error);

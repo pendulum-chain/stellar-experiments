@@ -121,7 +121,7 @@ impl Connection {
         let authenticated_msg = self.authenticate_message(msg);
         let xdr_authenticated_msg = xdr_converter::from_authenticated_message(&authenticated_msg)?;
 
-        let _  =self.stream.write(&xdr_authenticated_msg).map_err(|e| {
+        let _  = self.stream.write(&xdr_authenticated_msg).map_err(|e| {
             Error::WriteFailed(e.to_string())
         })?;
         Ok(())
@@ -233,9 +233,6 @@ impl Connection {
 
             StellarMessage::SendMore(_) => {}
             _ => {
-
-
-
 
             }
         }
@@ -424,7 +421,7 @@ impl Connection {
 
 
 // 1. is this library?
-// 2. if this is a library, should it be async? actor, state machine?
+// 2. if this is a library, should it be async_ops? actor, state machine?
 
 
 // pub funcs:
