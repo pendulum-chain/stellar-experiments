@@ -5,16 +5,16 @@ use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot};
 use crate::connection::Error;
 use crate::{get_message_length, parse_authenticated_message};
-use crate::connection_async::ConnectionConfig;
+use crate::async_ops::config::ConnectionConfig;
 
 pub struct Connector{
     tx_stream_writer:mpsc::Sender<Vec<u8>>,
     rx_stream_reader:mpsc::Receiver<Vec<u8>>,
-
     cfg:ConnectionConfig
 }
 
 impl Connector {
+    /// Returns channels needed to communicate with the stellar node.
     pub fn new(cfg:ConnectionConfig) -> (Self, mpsc::Sender<Vec<u8>>, mpsc::Receiver<Vec<u8>>, mpsc::Sender<Vec<u8>>)  {
         let (tx0,mut rx0) = mpsc::channel::<Vec<u8>>(1024);
         let (tx1,mut rx1) = mpsc::channel::<Vec<u8>>(1024);
@@ -119,17 +119,22 @@ pub async fn initialize(cfg:ConnectionConfig, addr:&str, tx_user:mpsc::Sender<St
     // prepare all the channels
     let (mut conn, tx_stream_writer, rx_stream_writer, tx) = Connector::new(cfg);
 
+    // split the stream for easy handling of read and write
     let (mut rd, mut wr) = create_streams(addr).await?;
 
+    // run the sending service
     tokio::spawn(sending_service(wr,rx_stream_writer));
 
+    // start the handshake
     conn.send_hello_message().await?;
 
+    // for handling the response, before sending it to the user
     tokio::spawn(async move {
         conn.handle_response(tx_user).await?;
         Ok::<_, Error>(())
     });
 
+    // start the receiving service
     tokio::spawn(async move {
     receiving_service(rd,tx).await?;
         Ok::<_, Error>(())

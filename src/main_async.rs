@@ -27,7 +27,7 @@ use tokio::io::AsyncReadExt;
 
 use tokio::sync::mpsc;
 use crate::async_ops::initialize;
-use crate::connection_async::{ConnectionConfig};
+use connection::async_ops::config::{ConnectionConfig};
 
 pub struct Config {
     secret_key: SecretKey,
