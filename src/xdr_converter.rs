@@ -3,21 +3,19 @@
 use base64::DecodeError;
 use std::fmt::Debug;
 use substrate_stellar_sdk::types::{
-    AuthenticatedMessage, AuthenticatedMessageV0, HmacSha256Mac, MessageType, StellarMessage,
+    AuthenticatedMessage, AuthenticatedMessageV0, DontHave, HmacSha256Mac, MessageType,
+    StellarMessage,
 };
 use substrate_stellar_sdk::{SecretKey, XdrCodec};
 use thiserror::Error;
 
 #[derive(Debug, Eq, PartialEq, err_derive::Error)]
 pub enum Error {
-
     #[error(display = "Data more than the max of U32")]
     UsizeToU32ExceedMax,
 
-
     #[error(display = "Message Version: Unsupported")]
     UnsupportedMessageVersion,
-
 
     #[error(display = "Decode Error: {}", _0)]
     DecodeError(String),
@@ -34,7 +32,24 @@ pub fn from_authenticated_message(message: &AuthenticatedMessage) -> Result<Vec<
     message_to_bytes(message)
 }
 
-pub fn parse_authenticated_message(xdr_message: &[u8]) -> Result<(AuthenticatedMessageV0,MessageType), Error> {
+/// To easily convert a message into a StellarMessage
+macro_rules! _stellar_message {
+    (&$ref:ident, $struct_str:ident) => {{
+        use crate::xdr_converter::log_decode_error;
+        use substrate_stellar_sdk::types::$struct_str;
+        use substrate_stellar_sdk::XdrCodec;
+
+        let ret: Result<StellarMessage, Error> = $struct_str::from_xdr($ref)
+            .map(|msg| StellarMessage::$struct_str(msg))
+            .map_err(|e| log_decode_error(stringify!($struct_str), e));
+
+        ret
+    }};
+}
+
+pub fn parse_authenticated_message(
+    xdr_message: &[u8],
+) -> Result<(AuthenticatedMessageV0, MessageType), Error> {
     let xdr_msg_len = xdr_message.len();
 
     let msg_vers = parse_message_version(&xdr_message[0..4])?;
@@ -50,7 +65,7 @@ pub fn parse_authenticated_message(xdr_message: &[u8]) -> Result<(AuthenticatedM
             message: parse_stellar_message(&xdr_message[12..(xdr_msg_len - 32)])?,
             mac: parse_hmac(&xdr_message[(xdr_msg_len - 32)..xdr_msg_len])?,
         },
-        msg_type
+        msg_type,
     ))
 }
 
@@ -64,7 +79,6 @@ pub fn get_message_length(data: &[u8]) -> u32 {
 
     u32::from_be_bytes(message_len.try_into().unwrap())
 }
-
 
 fn log_decode_error<T: Debug>(source: &str, error: T) -> Error {
     println!("Decode Error of {}: {:?}", source, error);
@@ -87,8 +101,8 @@ fn parse_hmac(xdr_message: &[u8]) -> Result<HmacSha256Mac, Error> {
     HmacSha256Mac::from_xdr(xdr_message).map_err(|e| log_decode_error("Hmac", e))
 }
 
-fn parse_message_type(xdr_message: &[u8]) -> Result<MessageType,Error> {
-    MessageType::from_xdr(&xdr_message).map_err(|e| log_decode_error("Message Type",e))
+fn parse_message_type(xdr_message: &[u8]) -> Result<MessageType, Error> {
+    MessageType::from_xdr(&xdr_message).map_err(|e| log_decode_error("Message Type", e))
 }
 
 /// Returns XDR format of the message or
@@ -112,8 +126,8 @@ fn message_to_bytes<T: XdrCodec>(message: &T) -> Result<Vec<u8>, Error> {
 
 #[cfg(test)]
 mod test {
-
-    use crate::xdr_converter::{get_message_length, parse_authenticated_message};
+    use crate::xdr_converter::{get_message_length, parse_authenticated_message, Error};
+    use substrate_stellar_sdk::types::StellarMessage;
 
     #[test]
     fn get_message_length_success() {
@@ -132,4 +146,11 @@ mod test {
     //     //todo: once the authenticatedmessagev0 type is solved, continue the test
     //     let _ = parse_authenticated_message(&msg);
     // }
+
+    #[test]
+    fn haha_my_test() {
+        let x = [1, 2, 3, 5];
+        let value = convert_to_stellar_message!(&x, Auth);
+        println!("SO the value: {:?}", value);
+    }
 }

@@ -41,7 +41,6 @@ fn main() -> std::io::Result<()> {
     )
     .unwrap();
 
-
     let node_info = NodeInfo::new(
         19,
         21,
@@ -50,13 +49,8 @@ fn main() -> std::io::Result<()> {
         &Network::new(b"Public Global Stellar Network ; September 2015"),
     );
 
-    let mut conn = Connection::new(
-        node_info,
-        secret,
-        0,
-        false,
-    "135.181.16.110:11625"
-    ).expect("SHOULD WORK!");
+    let mut conn =
+        Connection::new(node_info, secret, 0, false, "135.181.16.110:11625").expect("SHOULD WORK!");
 
     conn.start().expect("hoooy should be ok!!");
 

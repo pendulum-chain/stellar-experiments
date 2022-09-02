@@ -4,23 +4,20 @@ use crate::node::NodeInfo;
 use substrate_stellar_sdk::types::{Auth, AuthCert, Hello, StellarMessage, Uint256};
 use substrate_stellar_sdk::PublicKey;
 
-
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ReadState {
     ReadNotStarted,
     ReadyForMessage,
-    Blocked
+    Blocked,
 }
-
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum HandshakeState {
     Connecting,
     Connected,
     GotHello,
-    Completed
+    Completed,
 }
-
 
 pub fn create_auth_message() -> StellarMessage {
     let auth = Auth { unused: 1 };
@@ -50,4 +47,3 @@ pub fn create_hello_message(
 
     StellarMessage::Hello(hello)
 }
-

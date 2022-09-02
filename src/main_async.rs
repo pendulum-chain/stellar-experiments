@@ -20,14 +20,12 @@ use substrate_stellar_sdk as stellar;
 use substrate_stellar_sdk::network::Network;
 use substrate_stellar_sdk::SecretKey;
 
-
-use tokio::net::TcpStream;
-use tokio::io::AsyncWriteExt;
 use tokio::io::AsyncReadExt;
+use tokio::io::AsyncWriteExt;
+use tokio::net::TcpStream;
 
+use crate::async_ops::connect;
 use tokio::sync::mpsc;
-use crate::async_ops::initialize;
-use connection::async_ops::config::{ConnectionConfig};
 
 pub struct Config {
     secret_key: SecretKey,
@@ -37,16 +35,12 @@ pub struct Config {
     node_info: NodeInfo,
 }
 
-
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut cfg = {
-
-        let secret = stellar::SecretKey::from_encoding(
-            "SBLI7RKEJAEFGLZUBSCOFJHQBPFYIIPLBCKN7WVCWT4NEG2UJEW33N73",
-        )
-            .unwrap();
+        let secret =
+            SecretKey::from_encoding("SBLI7RKEJAEFGLZUBSCOFJHQBPFYIIPLBCKN7WVCWT4NEG2UJEW33N73")
+                .unwrap();
 
         let node_info = NodeInfo::new(
             19,
@@ -56,28 +50,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             &Network::new(b"Public Global Stellar Network ; September 2015"),
         );
 
-        ConnectionConfig::new(
-            node_info,
-            secret,
-            0,
-            false,
-        )
+        async_ops::ConnectionConfig::new(node_info, secret, 0, false)
     };
     let addr = "135.181.16.110:11625";
 
-    let (tx, mut rx) = mpsc::channel::<StellarMessage>(1024);
+    let mut user_controls = connect(cfg, addr).await?;
 
 
-    let tx_writer = initialize(cfg, addr, tx).await?;
+    let what_to_do = |msg: StellarMessage| {
+        // handle the messages you receive, here.
+        println!(
+            "\nreceived message:\n------------------\n{:?}\n------------------\n",
+            msg
+        );
+    };
 
+    let mut counter = 0;
     loop {
-        if let Some(msg) = rx.recv().await {
-            println!("handle this message: {:?}", msg);
-
-            println!("let's try to sendsome")
+        if counter == 1 {
+            // this is just an example message I send to the Stellar Node.
+            user_controls.send(StellarMessage::GetPeers).await?;
         }
 
+        if user_controls.is_handshake_complete() {
+            counter += 1;
+        }
+
+        user_controls.recv(what_to_do).await?;
     }
-
-
 }
