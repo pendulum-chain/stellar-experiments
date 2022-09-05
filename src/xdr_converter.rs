@@ -74,10 +74,14 @@ pub fn get_message_length(data: &[u8]) -> u32 {
         return 0;
     }
 
+
     let mut message_len = data[0..4].to_vec();
     message_len[0] &= 0x7f;
 
-    u32::from_be_bytes(message_len.try_into().unwrap())
+
+    let res = u32::from_be_bytes(message_len.try_into().unwrap());
+    println!("get_message_length res: {:?}",res);
+    res
 }
 
 fn log_decode_error<T: Debug>(source: &str, error: T) -> Error {

@@ -3,6 +3,7 @@ use substrate_stellar_sdk::network::Network;
 
 pub type NetworkId = [u8; 32];
 
+#[derive(Debug, Clone)]
 pub struct NodeInfo {
     pub ledger_version: u32,
     pub overlay_version: u32,

@@ -24,7 +24,7 @@ use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 
-use crate::async_ops::connect;
+use crate::async_ops::{connect, ConnectionState};
 use tokio::sync::mpsc;
 
 pub struct Config {
@@ -50,32 +50,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             &Network::new(b"Public Global Stellar Network ; September 2015"),
         );
 
-        async_ops::ConnectionConfig::new(node_info, secret, 0, false)
+        async_ops::Connector::new(node_info, secret, 0, false)
     };
     let addr = "135.181.16.110:11625";
 
     let mut user_controls = connect(cfg, addr).await?;
 
-
-    let what_to_do = |msg: StellarMessage| {
-        // handle the messages you receive, here.
-        println!(
-            "\nreceived message:\n------------------\n{:?}\n------------------\n",
-            msg
-        );
-    };
-
-    let mut counter = 0;
     loop {
-        if counter == 1 {
-            // this is just an example message I send to the Stellar Node.
-            user_controls.send(StellarMessage::GetPeers).await?;
-        }
 
-        if user_controls.is_handshake_complete() {
-            counter += 1;
-        }
+        if let Some(conn_state) = user_controls.recv().await {
+            match conn_state {
+                ConnectionState::Connect { pub_key, node_info } => {
+                    println!("Connected to Stellar Node: {:?}", String::from_utf8(pub_key.to_encoding()).unwrap());
+                    println!("{:?}",node_info);
 
-        user_controls.recv(what_to_do).await?;
+                    user_controls.send(StellarMessage::GetScpState(0)).await?;
+                }
+                ConnectionState::Data(msg) => {
+                    match msg {
+                        StellarMessage::ScpMessage(env) => {
+                            println!("received scpmessage {:?}", env.statement.pledges);
+                        }
+                        other => {
+                            println!("receive stellar message other message...{:?}", other);
+                        }
+                    }
+
+                }
+                ConnectionState::Error(_) => {}
+                ConnectionState::Timeout => {
+                    return Ok(());
+                }
+            }
+
+        }
     }
 }
