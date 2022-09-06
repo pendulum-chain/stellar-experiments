@@ -25,7 +25,7 @@ pub enum ConnectionState {
         pub_key:PublicKey,
         node_info:NodeInfo
     },
-    Data(StellarMessage),
+    Data(u32, StellarMessage),
     Error(String),
     Timeout
 }
@@ -62,13 +62,13 @@ pub struct Connector {
 
 impl Connector {
     /// Sends an xdr version of a wrapped AuthenticatedMessage ( StellarMessage ).
-    async fn send_stellar_message(&mut self, msg: StellarMessage) -> Result<(), Error> {
+    pub(crate) async fn send_stellar_message(&mut self, msg: StellarMessage) -> Result<(), Error> {
         // wraps the StellarMessage with AuthenticatedMessage and get the xdr format.
         let auth_msg = self.authenticate_message(msg);
         let xdr_msg = xdr_converter::from_authenticated_message(&auth_msg)?;
 
         let sender = self.stream_writer.as_ref().ok_or(Error::ChannelNotSet)?;
-        sender.send(xdr_msg).await.map_err(Error::from)
+        sender.send((0,xdr_msg)).await.map_err(Error::from)
     }
 
     /// Wraps the stellar message with `AuthenticatedMessage`
@@ -108,8 +108,9 @@ impl Connector {
     }
 
     /// Processes the raw bytes from the stream
-    async fn process_raw_message(&mut self, data: &[u8]) -> Result<(), Error> {
-        let (auth_msg, msg_type) = parse_authenticated_message(data)?;
+    pub(crate) async fn process_raw_message(&mut self, xdr:Xdr) -> Result<(), Error> {
+        let (message_id, data) = xdr;
+        let (auth_msg, msg_type) = parse_authenticated_message(&data)?;
         // println!(
         //     "process_raw_message: MessageType: {:?} remote_seq: {:?}",
         //     msg_type, self.remote_sequence
@@ -131,14 +132,14 @@ impl Connector {
                     self.verify_auth(&auth_msg, &data[4..(data.len() - 32)])?;
                     self.remote_sequence += 1;
                 }
-                self.process_stellar_message(auth_msg.message, msg_type).await?;
+                self.process_stellar_message(message_id, auth_msg.message, msg_type).await?;
             }
         }
         Ok(())
     }
 
     /// Handles what to do next with the message. Mostly it will be sent back to the user
-    async fn process_stellar_message(&mut self, msg: StellarMessage, msg_type:MessageType) -> Result<(), Error> {
+    async fn process_stellar_message(&mut self, message_id:u32, msg: StellarMessage, msg_type:MessageType) -> Result<(), Error> {
         match msg {
             StellarMessage::ErrorMsg(_) => {}
             StellarMessage::Hello(hello) => {
@@ -168,7 +169,7 @@ impl Connector {
                     .stellar_message_writer
                     .as_ref()
                     .ok_or(Error::ChannelNotSet)?;
-                sender.send(ConnectionState::Data(other)).await?;
+                sender.send(ConnectionState::Data(message_id,other)).await?;
                 self.check_to_send_more(msg_type).await?;
             }
         }
@@ -360,7 +361,7 @@ impl Connector {
         )
     }
 
-    async fn send_hello_message(&mut self) -> Result<(), Error> {
+    pub(crate) async fn send_hello_message(&mut self) -> Result<(), Error> {
         println!("\n----------- SENDING HELLO MESSAGE: -------------");
         let time_now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -417,28 +418,5 @@ impl Connector {
 
     pub fn set_message_writer(&mut self, sender: mpsc::Sender<ConnectionState>) {
         self.stellar_message_writer = Some(sender);
-    }
-}
-
-
-/// Where communication happens with the channels holding the stream.
-pub async fn comm_service(
-    mut cfg: Connector,
-    mut receiver: mpsc::Receiver<ConnectorActions>,
-) -> Result<(), Error> {
-    loop {
-        if let Some(actions) = receiver.recv().await {
-            match actions {
-                ConnectorActions::SendMessage(msg) => {
-                    cfg.send_stellar_message(msg).await?;
-                }
-                ConnectorActions::HandleMessage(xdr) => {
-                    cfg.process_raw_message(&xdr).await?;
-                }
-                ConnectorActions::SendHello => {
-                    cfg.send_hello_message().await?;
-                }
-            }
-        }
     }
 }

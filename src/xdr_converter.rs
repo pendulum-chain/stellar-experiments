@@ -74,15 +74,25 @@ pub fn get_message_length(data: &[u8]) -> u32 {
         return 0;
     }
 
-
     let mut message_len = data[0..4].to_vec();
     message_len[0] &= 0x7f;
 
 
     let res = u32::from_be_bytes(message_len.try_into().unwrap());
-    println!("get_message_length res: {:?}",res);
     res
 }
+
+pub fn  is_xdr_complete_message(data:&[u8], message_len:usize) -> bool {
+    return data.len() - 4 >= message_len
+}
+
+pub fn get_message(data:&[u8], message_len:usize) -> (Vec<u8>, Vec<u8>) {
+    (
+        data[4..(message_len + 4)].to_owned(),
+        data[0..(message_len + 4)].to_owned()
+    )
+}
+
 
 fn log_decode_error<T: Debug>(source: &str, error: T) -> Error {
     println!("Decode Error of {}: {:?}", source, error);
@@ -130,7 +140,7 @@ fn message_to_bytes<T: XdrCodec>(message: &T) -> Result<Vec<u8>, Error> {
 
 #[cfg(test)]
 mod test {
-    use crate::xdr_converter::{get_message_length, parse_authenticated_message, Error};
+    use crate::xdr_converter::{get_message_length, parse_authenticated_message, Error, is_xdr_complete_message, get_message};
     use substrate_stellar_sdk::types::StellarMessage;
 
     #[test]
@@ -140,21 +150,48 @@ mod test {
         assert_eq!(get_message_length(&arr), 284);
     }
 
-    // #[test]
-    // fn parse_authenticated_message_success() {
-    //     let msg = base64::decode_config(
-    //         "AAAAAAAAAAAAAAA7AAAACwAAAACMHUtKNgEX1QDfz4zesWaxmhLg9Le806GgxemeQfaXmQAAAAACKDOuAAAAAzQaCq4p6tLHpdfwGhnlyX9dMUP70r4Dm98Td6YvKnhoAAAAAQAAAJg1D82tsvx59BI2BldZq12xYzdrhUkIflWnRwbiJsoMUgAAAABg4A0jAAAAAAAAAAEAAAAAUwoi9HcvJrwUn5w15omNdNffAJKoHHDdZh+2c+8VUd4AAABAB5/NoeG4iJJitcTDJvdhDLaLL9FSUHodRXvMEjbGKeDSkSXDgl+q+VvDXenwQNOOhLg112bsviGwh61ci4HnAgAAAAEAAACYNQ/NrbL8efQSNgZXWatdsWM3a4VJCH5Vp0cG4ibKDFIAAAAAYOANIwAAAAAAAAABAAAAAFMKIvR3Lya8FJ+cNeaJjXTX3wCSqBxw3WYftnPvFVHeAAAAQAefzaHhuIiSYrXEwyb3YQy2iy/RUlB6HUV7zBI2xing0pElw4Jfqvlbw13p8EDTjoS4Nddm7L4hsIetXIuB5wIAAABAyN92d7osuHXtUWHoEQzSRH5f9h6oEQAGK02b4CO4bQchmpbwbqGQLdbD9psFpamuLrDK+QJiBuKw3PVnMNlMDA9Ws6xvU3NyJ/OBsg2EZicl61zCYxrQXQ4Qq/eXI+wT",
-    //         base64::STANDARD
-    //     ).unwrap();
-    //
-    //     //todo: once the authenticatedmessagev0 type is solved, continue the test
-    //     let _ = parse_authenticated_message(&msg);
-    // }
+    #[test]
+    fn parse_authenticated_message_success() {
+        let msg = base64::decode_config(
+            "AAAAAAAAAAAAAAA7AAAACwAAAACMHUtKNgEX1QDfz4zesWaxmhLg9Le806GgxemeQfaXmQAAAAACKDOuAAAAAzQaCq4p6tLHpdfwGhnlyX9dMUP70r4Dm98Td6YvKnhoAAAAAQAAAJg1D82tsvx59BI2BldZq12xYzdrhUkIflWnRwbiJsoMUgAAAABg4A0jAAAAAAAAAAEAAAAAUwoi9HcvJrwUn5w15omNdNffAJKoHHDdZh+2c+8VUd4AAABAB5/NoeG4iJJitcTDJvdhDLaLL9FSUHodRXvMEjbGKeDSkSXDgl+q+VvDXenwQNOOhLg112bsviGwh61ci4HnAgAAAAEAAACYNQ/NrbL8efQSNgZXWatdsWM3a4VJCH5Vp0cG4ibKDFIAAAAAYOANIwAAAAAAAAABAAAAAFMKIvR3Lya8FJ+cNeaJjXTX3wCSqBxw3WYftnPvFVHeAAAAQAefzaHhuIiSYrXEwyb3YQy2iy/RUlB6HUV7zBI2xing0pElw4Jfqvlbw13p8EDTjoS4Nddm7L4hsIetXIuB5wIAAABAyN92d7osuHXtUWHoEQzSRH5f9h6oEQAGK02b4CO4bQchmpbwbqGQLdbD9psFpamuLrDK+QJiBuKw3PVnMNlMDA9Ws6xvU3NyJ/OBsg2EZicl61zCYxrQXQ4Qq/eXI+wT",
+            base64::STANDARD
+        ).unwrap();
+
+        //todo: once the authenticatedmessagev0 type is solved, continue the test
+        let _ = parse_authenticated_message(&msg);
+    }
 
     #[test]
-    fn haha_my_test() {
-        let x = [1, 2, 3, 5];
-        let value = convert_to_stellar_message!(&x, Auth);
-        println!("SO the value: {:?}", value);
+    fn message_not_complete_check() {
+
+        let xdr_no_next_msg = base64::decode_config(
+            "gAABaAAAAAAAAAAAAAAAAgAAAAsAAAAAAsUlnka7dHFfp69mUW6kEQ18IpsXLwcYk6yphpesUysAAAAAAULT7wAAAAN1tE4FkHboorc8QsJU7+LkIN2zbNK9MrkY49OpVcEzDwAAAAIAAAAw/0TiDQ==",
+            base64::STANDARD
+        ).unwrap();
+
+        let len = get_message_length(&xdr_no_next_msg);
+
+        let len = usize::try_from(len).unwrap();
+        assert!(!is_xdr_complete_message(&xdr_no_next_msg,len ));
     }
+
+    #[test]
+    fn message_complete() {
+        let xdr_has_next_msg = base64::decode_config(
+            "gAAANAAAAAAAAAAAAAAAAAAAAAIAAAAAv2qE3dixC3UHHZmFXQGPliZ90ghxAiO5C4fYG/G4EeqAAANUAAAAAAAAAAAAAAABAAAABQAAADIAAAAAqTm9CAAALWkAAAAAAAAAAKkvb34AAC1pAAAAAAAAAAA23YxJAAAtaQAAAAAAAAAANDdVmQAALWkAAAAAAAAAAKkzSDUAAC1pAAAAAAAAAACer1MIAAAtaQAAAAAAAAAAI8ZHBAAALWkAAAAAAAAAACPGQFcAAC1pAAAAAAAAAACCxkWYAAAtaQAAAAAAAAAAaxSf6AAALWkAAAAAAAAAACv/s4IAAC1pAAAAAAAAAAA2TpjFAAAtaQAAAAAAAAAAsj7l8gAALWkAAAAAAAAAALhIZ40AAC1pAAAAAAAAAACeQEz9AAAtaQAAAAAAAAAAq2DFJwAALWkAAAAAAAAAADZKcDEAAC1pAAAAAAAAAAAnPPzbAAAtaQAAAAAAAAAAcyEZJgAALWkAAAAAAAAAACm+Dn4AAC1pAAAAAAAAAAB04vMyAAAtaQAAAAAAAAAANk4tVQAALWkAAAAAAAAAANRcdnwAAC1pAAAAAAAAAAB9J5EIAAAtaQAAAAAAAAAApeOhygAALWkAAAAAAAAAAK4kOPYAAC1pAAAAAAAAAABnC1mkAAAtaQAAAAAAAAAANqo7KwAALWkAAAAAAAAAADRO0w0AAC1pAAAAAAAAAAABtNQAAAAtaQAAAAAAAAAAcm+nvgAALWkAAAAAAAAAALS/SCYAAC1pAAAAAAAAAAA2SvPwAAAtaQAAAAAAAAAANpKzmAAALWkAAAAAAAAAAJ5VSogAAC1pAAAAAAAAAACyotgHAAAtaQAAAAAAAAAANkoQ2wAALWkAAAAAAAAAADZOAFMAAC1pAAAAAAAAAAA2qm9GAAAtaQAAAAAAAAAANpvTAgAALWkAAAAAAAAAAG/GQiEAAC1pAAAAAAAAAAAju7lmAAAtaQAAAAAAAAAANk7rHwAALWkAAAAAAAAAABfyLQ0AAC1pAAAAAAAAAAA2TjaRAAAtaQAAAAAAAAAANk5J7gAALWkAAAAAAAAAAHRm84QAAC1pAAAAAAAAAAAr/7KvAAAtaQAAAAAAAAAAufEGsgAALWkAAAAAAAAAADZOzt4AAC1pAAAAADKjiRSHBdyaVK1C+7UoMAGGyLJ5D1CjOi7gsns2GEFBgAABaAAAAAAAAAAAAAAAAgAAAAsAAAAAAsUlnka7dHFfp69mUW6kEQ18IpsXLwcYk6yphpesUysAAAAAAULT7wAAAAN1tE4FkHboorc8QsJU7+LkIN2zbNK9MrkY49OpVcEzDwAAAAIAAAAw/0TiDQ==",
+            base64::STANDARD
+        ).unwrap();
+
+        let len = get_message_length(&xdr_has_next_msg);
+        let len = usize::try_from(len).unwrap();
+
+        let (nxt_msg, remaining) = get_message(&xdr_has_next_msg,len);
+
+        let str= base64::encode(nxt_msg);
+        assert_eq!(&str,"AAAAAAAAAAAAAAAAAAAAAgAAAAC/aoTd2LELdQcdmYVdAY+WJn3SCHECI7kLh9gb8bgR6g==");
+
+
+
+    }
+
 }

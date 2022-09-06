@@ -6,6 +6,7 @@ use substrate_stellar_sdk::PublicKey;
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ReadState {
+    ReadyForLength,
     ReadNotStarted,
     ReadyForMessage,
     Blocked,

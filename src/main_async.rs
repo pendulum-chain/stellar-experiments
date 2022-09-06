@@ -27,14 +27,6 @@ use tokio::net::TcpStream;
 use crate::async_ops::{connect, ConnectionState};
 use tokio::sync::mpsc;
 
-pub struct Config {
-    secret_key: SecretKey,
-    secret_key_ecdh: String,
-    auth_time: u64,
-    connection_local_nonce: String,
-    node_info: NodeInfo,
-}
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut cfg = {
@@ -66,13 +58,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     user_controls.send(StellarMessage::GetScpState(0)).await?;
                 }
-                ConnectionState::Data(msg) => {
+                ConnectionState::Data(p_id, msg) => {
+                    println!("receive stellar message pid: {}", p_id);
                     match msg {
                         StellarMessage::ScpMessage(env) => {
-                            println!("received scpmessage {:?}", env.statement.pledges);
+                            println!("  --> scpmessage");
                         }
                         other => {
-                            println!("receive stellar message other message...{:?}", other);
+                            println!("  --> other: {:?}", other);
                         }
                     }
 
