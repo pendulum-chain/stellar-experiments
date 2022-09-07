@@ -5,7 +5,7 @@ use crate::connection::handshake;
 use crate::connection::{Error as ConnectionError, Error};
 use crate::{
     create_auth_cert, create_auth_message, create_receiving_mac_key, create_sending_mac_key,
-    gen_shared_key, get_message_length, parse_authenticated_message, xdr_converter, HandshakeState,
+    gen_shared_key, get_xdr_message_length, parse_authenticated_message, xdr_converter, HandshakeState,
     ReadState,
 };
 use hmac::Hmac;
@@ -142,13 +142,12 @@ impl Connection {
 
         loop {
             if read_size > 0 {
-                println!(" read size: {:?}", read_size);
 
                 // If size bytes are not available to be read, null will be returned unless
                 // the stream has ended, in which case all of the data
                 // remaining in the internal buffer will be returned.
 
-                let message_len = get_message_length(&readbuf);
+                let message_len = get_xdr_message_length(&readbuf);
                 let message_len = usize::try_from(message_len).unwrap();
 
                 if message_len > readbuf.len() {
@@ -177,10 +176,10 @@ impl Connection {
     // todo: time out if response is taking too much time
     fn process_next_message(&mut self, data: &[u8]) -> Result<(), Error> {
         let (auth_msg, msg_type) = parse_authenticated_message(data)?;
-        println!(
-            "process_next_message: MessageType: {:?} remote_seq: {:?}",
-            msg_type, self.remote_sequence
-        );
+        // println!(
+        //     "process_next_message: MessageType: {:?} remote_seq: {:?}",
+        //     msg_type, self.remote_sequence
+        // );
 
         match msg_type {
             MessageType::Transaction if !self.receiveTransactionMessages => {

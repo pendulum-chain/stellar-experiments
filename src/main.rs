@@ -11,7 +11,7 @@ use std::net::TcpStream;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::node::NodeInfo;
-use crate::xdr_converter::{get_message_length, parse_authenticated_message};
+use crate::xdr_converter::{get_xdr_message_length, parse_authenticated_message};
 use hmac::Hmac;
 use stellar::compound_types::LimitedString;
 use stellar::types::{
@@ -94,7 +94,7 @@ fn main() -> std::io::Result<()> {
     //     let size = stream.read(&mut readbuf)?;
     //
     //     if size > 0 {
-    //         let msg_len = get_message_length(&readbuf);
+    //         let msg_len = get_xdr_message_length(&readbuf);
     //         let msg_len = usize::try_from(msg_len).unwrap();
     //
     //         if msg_len <= readbuf.len() {

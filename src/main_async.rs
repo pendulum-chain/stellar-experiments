@@ -8,7 +8,7 @@ use std::fs::read;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::node::NodeInfo;
-use crate::xdr_converter::{get_message_length, parse_authenticated_message};
+use crate::xdr_converter::{get_xdr_message_length, parse_authenticated_message};
 use hmac::Hmac;
 use stellar::compound_types::LimitedString;
 use stellar::types::{
@@ -59,13 +59,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     user_controls.send(StellarMessage::GetScpState(0)).await?;
                 }
                 ConnectionState::Data(p_id, msg) => {
-                    println!("receive stellar message pid: {}", p_id);
+
                     match msg {
                         StellarMessage::ScpMessage(env) => {
-                            println!("  --> scpmessage");
+                            println!("pid: {:?}  --> {:?}", p_id, env.statement.pledges);
                         }
                         other => {
-                            println!("  --> other: {:?}", other);
+                            println!("pid: {:?}  --> other: {:?}", p_id, other);
                         }
                     }
 

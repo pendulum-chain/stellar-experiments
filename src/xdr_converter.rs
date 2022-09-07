@@ -69,7 +69,7 @@ pub fn parse_authenticated_message(
     ))
 }
 
-pub fn get_message_length(data: &[u8]) -> u32 {
+pub fn get_xdr_message_length(data: &[u8]) -> usize {
     if data.len() < 4 {
         return 0;
     }
@@ -78,9 +78,14 @@ pub fn get_message_length(data: &[u8]) -> u32 {
     message_len[0] &= 0x7f;
 
 
-    let res = u32::from_be_bytes(message_len.try_into().unwrap());
-    res
+    let len =  u32::from_be_bytes(
+        message_len.try_into().unwrap_or([0,0,0,0])
+    );
+
+    usize::try_from(len).unwrap_or(0)
 }
+
+
 
 pub fn  is_xdr_complete_message(data:&[u8], message_len:usize) -> bool {
     return data.len() - 4 >= message_len
@@ -95,7 +100,6 @@ pub fn get_message(data:&[u8], message_len:usize) -> (Vec<u8>, Vec<u8>) {
 
 
 fn log_decode_error<T: Debug>(source: &str, error: T) -> Error {
-    println!("Decode Error of {}: {:?}", source, error);
     Error::DecodeError(source.to_string())
 }
 
@@ -140,14 +144,14 @@ fn message_to_bytes<T: XdrCodec>(message: &T) -> Result<Vec<u8>, Error> {
 
 #[cfg(test)]
 mod test {
-    use crate::xdr_converter::{get_message_length, parse_authenticated_message, Error, is_xdr_complete_message, get_message};
+    use crate::xdr_converter::{get_xdr_message_length, parse_authenticated_message, Error, is_xdr_complete_message, get_message};
     use substrate_stellar_sdk::types::StellarMessage;
 
     #[test]
-    fn get_message_length_success() {
+    fn get_xdr_message_length_success() {
         let arr: [u8; 4] = [128, 0, 1, 28];
 
-        assert_eq!(get_message_length(&arr), 284);
+        assert_eq!(get_xdr_message_length(&arr), 284);
     }
 
     #[test]
@@ -169,7 +173,7 @@ mod test {
             base64::STANDARD
         ).unwrap();
 
-        let len = get_message_length(&xdr_no_next_msg);
+        let len = get_xdr_message_length(&xdr_no_next_msg);
 
         let len = usize::try_from(len).unwrap();
         assert!(!is_xdr_complete_message(&xdr_no_next_msg,len ));
@@ -182,7 +186,7 @@ mod test {
             base64::STANDARD
         ).unwrap();
 
-        let len = get_message_length(&xdr_has_next_msg);
+        let len = get_xdr_message_length(&xdr_has_next_msg);
         let len = usize::try_from(len).unwrap();
 
         let (nxt_msg, remaining) = get_message(&xdr_has_next_msg,len);
