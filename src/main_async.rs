@@ -62,10 +62,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     match msg {
                         StellarMessage::ScpMessage(env) => {
-                            println!("pid: {:?}  --> {:?}", p_id, env.statement.pledges);
+                            println!("\npid: {:?}  --> {:?}", p_id, env.statement.pledges);
                         }
                         other => {
-                            println!("pid: {:?}  --> other: {:?}", p_id, other);
+                            println!("\npid: {:?}  --> {:?}", p_id, other);
                         }
                     }
 

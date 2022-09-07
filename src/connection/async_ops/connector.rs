@@ -318,10 +318,10 @@ impl Connector {
 
     /// Verifies the AuthenticatedMessage, received from the Stellar Node
     fn verify_auth(&self, auth_msg: &AuthenticatedMessageV0, body: &[u8]) -> Result<(), Error> {
-        println!(
-            "remote sequence: {:?}, auth sequence: {:?}",
-            self.remote_sequence, auth_msg.sequence
-        );
+        // println!(
+        //     "remote sequence: {:?}, auth sequence: {:?}",
+        //     self.remote_sequence, auth_msg.sequence
+        // );
         if self.remote_sequence != auth_msg.sequence {
             //must be handled on main thread because workers could mix up order of messages.
             return Err(Error::InvalidSequenceNumber);
