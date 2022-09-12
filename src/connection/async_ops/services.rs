@@ -45,7 +45,7 @@ async fn receiving_service(
     mut r_stream: tcp::OwnedReadHalf,
     tx_stream_reader: mpsc::Sender<ConnectorActions>,
 ) -> Result<(), Error> {
-    let mut message_id = 0;
+    let mut proc_id = 0;
 
     // holds the number of bytes that were missing from the previous stellar message.
     let mut lack_bytes_from_prev = 0;
@@ -61,7 +61,11 @@ async fn receiving_service(
                 // then check the size of next stellar message.
                 // If it's not enough, skip it.
                 let xpect_msg_len = next_message_length(&mut r_stream).await;
-                // println!("\npid: {:?} next message length: {:?}", message_id, xpect_msg_len);
+                log::trace!(
+                    "proc_id: {} The next message length: {}",
+                    proc_id,
+                    xpect_msg_len
+                );
 
                 if xpect_msg_len > 0 {
                     // let's start reading the actual stellar message.
@@ -72,25 +76,24 @@ async fn receiving_service(
                         .await
                         .map_err(|e| Error::ReadFailed(e.to_string()))?;
 
-                    //println!("  ---> pid: {:?} xpected_msg_len: {} actual_msg_len: {}", message_id, xpect_msg_len,actual_msg_len);
-
                     // only when the message has the exact expected size bytes, should we send to user.
                     if actual_msg_len == xpect_msg_len {
                         tx_stream_reader
-                            .send(ConnectorActions::HandleMessage((
-                                message_id,
-                                readbuf.clone(),
-                            )))
+                            .send(ConnectorActions::HandleMessage((proc_id, readbuf.clone())))
                             .await?;
 
                         readbuf.clear();
-                        message_id += 1;
+                        proc_id += 1;
                     } else {
                         // so the next bytes are remnants from the previous stellar message.
                         // save it and read it on the next loop.
                         lack_bytes_from_prev = xpect_msg_len - actual_msg_len;
                         readbuf = readbuf[0..actual_msg_len].to_owned();
-                        // println!("\n  ---> pid: {:?} not enough readbuf: {:?}", message_id, readbuf);
+                        log::trace!(
+                            "proc_id: {} received only partial message. Need {} bytes to complete.",
+                            proc_id,
+                            lack_bytes_from_prev
+                        );
                     }
                 }
             }
@@ -103,70 +106,78 @@ async fn receiving_service(
                     .await
                     .map_err(|e| Error::ReadFailed(e.to_string()))?;
 
-                //println!("  ---> pid: {:?} contbuf: xpected_msg_len: {} actual_msg_len: {}", message_id, lack_bytes_from_prev,actual_msg_len);
-
+                // this partial message, completes the previous message.
                 if actual_msg_len == lack_bytes_from_prev {
+                    log::trace!(
+                        "proc_id: {} received continuation from the previous message.",
+                        proc_id
+                    );
                     readbuf.append(&mut cont_buf);
 
                     tx_stream_reader
-                        .send(ConnectorActions::HandleMessage((
-                            message_id,
-                            readbuf.clone(),
-                        )))
+                        .send(ConnectorActions::HandleMessage((proc_id, readbuf.clone())))
                         .await?;
 
                     lack_bytes_from_prev = 0;
                     readbuf.clear();
-                    message_id += 1;
-                } else if actual_msg_len > 0 {
+                    proc_id += 1;
+                }
+                // this partial message is not enough to complete the previous message.
+                else if actual_msg_len > 0 {
                     lack_bytes_from_prev -= actual_msg_len;
                     cont_buf = cont_buf[0..actual_msg_len].to_owned();
-                    //cont_buf.truncate(lack_bytes_from_prev);
                     readbuf.append(&mut cont_buf);
+                    log::trace!("proc_id: {} not enough bytes to complete the previous message. Need {} bytes to complete."
+                        ,proc_id, lack_bytes_from_prev);
                 }
             }
-            Err(e) => {
-                println!("STREAM NOT YET READABLE: {:?}", e);
-            }
+            Err(_) => {}
         }
     }
 }
 
-/// Where communication happens with the channels holding the write half of the stream.
+/// Handles actions for the connection.
 /// # Arguments
-/// * `w_stream` - the write stream for writing the xdr stellar message
-/// * `rx_stream_writer` - the receiver where we get the stellar message from the user.
-pub async fn comm_service(
-    mut cfg: Connector,
+/// * `conn` - the Connector that would send/handle messages to/from Stellar Node
+/// * `receiver` - The receiver for actions that the Connector should do.
+/// * `w_stream` -> the write half of the TcpStream to connect to the Stellar Node
+pub async fn connection_handler(
+    mut conn: Connector,
     mut receiver: mpsc::Receiver<ConnectorActions>,
     mut w_stream: tcp::OwnedWriteHalf,
 ) -> Result<(), Error> {
     loop {
-        if let Some(actions) = receiver.recv().await {
-            match actions {
-                ConnectorActions::SendMessage(msg) => {
-                    let xdr_msg = cfg.create_xdr_message(msg)?;
-                    w_stream
-                        .write_all(&xdr_msg)
-                        .await
-                        .map_err(|e| Error::WriteFailed(e.to_string()))?;
-                }
-                ConnectorActions::HandleMessage(xdr) => {
-                    cfg.process_raw_message(xdr).await?;
-                }
-                ConnectorActions::SendHello => {
-                    let msg = cfg.create_hello_message(time_now())?;
-                    w_stream
-                        .write_all(&msg)
-                        .await
-                        .map_err(|e| Error::WriteFailed(e.to_string()))?;
-                }
+        match receiver.recv().await {
+            // write message to the stream
+            Some(ConnectorActions::SendMessage(msg)) => {
+                let xdr_msg = conn.create_xdr_message(msg)?;
+                w_stream
+                    .write_all(&xdr_msg)
+                    .await
+                    .map_err(|e| Error::WriteFailed(e.to_string()))?;
             }
+
+            // handle incoming message from the stream
+            Some(ConnectorActions::HandleMessage(xdr)) => {
+                conn.process_raw_message(xdr).await?;
+            }
+
+            // start the connection to Stellar node with a 'hello'
+            Some(ConnectorActions::SendHello) => {
+                log::info!("Starting Handshake with Hello.");
+                let msg = conn.create_hello_message(time_now())?;
+                w_stream
+                    .write_all(&msg)
+                    .await
+                    .map_err(|e| Error::WriteFailed(e.to_string()))?;
+            }
+
+            None => {}
         }
     }
 }
 
-/// The actual connection to the Stellar Node.
+/// Triggers connection to the Stellar Node.
 /// Returns the UserControls for the user to send and receive Stellar messages.
 pub async fn connect(mut conn: Connector, addr: &str) -> Result<UserControls, Error> {
     // split the stream for easy handling of read and write
@@ -188,7 +199,7 @@ pub async fn connect(mut conn: Connector, addr: &str) -> Result<UserControls, Er
     tokio::spawn(receiving_service(rd, actions_sender.clone()));
 
     // run the conn communication
-    tokio::spawn(comm_service(conn, actions_receiver, wr));
+    tokio::spawn(connection_handler(conn, actions_receiver, wr));
 
     // start the handshake
     actions_sender.send(ConnectorActions::SendHello).await?;

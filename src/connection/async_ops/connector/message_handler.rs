@@ -12,12 +12,10 @@ use substrate_stellar_sdk::XdrCodec;
 impl Connector {
     /// Processes the raw bytes from the stream
     pub(crate) async fn process_raw_message(&mut self, xdr: Xdr) -> Result<(), Error> {
-        let (message_id, data) = xdr;
-        // println!(
-        //     "pid: {:?} process_raw_message:  remote_seq: {:?}",
-        //     message_id, self.remote_sequence
-        // );
+        let (proc_id, data) = xdr;
         let (auth_msg, msg_type) = parse_authenticated_message(&data)?;
+
+        log::debug!("proc_id: {} processing {:?}", proc_id, msg_type);
 
         match msg_type {
             MessageType::Transaction if !self.receive_tx_messages => {
@@ -34,15 +32,16 @@ impl Connector {
                 if self.handshake_state >= HandshakeState::GotHello {
                     self.verify_auth(&auth_msg, &data[4..(data.len() - 32)])?;
                     self.increment_remote_sequence()?;
+                    log::trace!("proc_id: {}, auth message verified", proc_id);
                 }
-                self.process_stellar_message(message_id, auth_msg.message, msg_type)
+                self.process_stellar_message(proc_id, auth_msg.message, msg_type)
                     .await?;
             }
         }
         Ok(())
     }
 
-    /// Handles what to do next with the message. Mostly it will be sent back to the user
+    /// Handles what to do next with the Stellar message. Mostly it will be sent back to the user
     async fn process_stellar_message(
         &mut self,
         message_id: u32,
@@ -50,7 +49,6 @@ impl Connector {
         msg_type: MessageType,
     ) -> Result<(), Error> {
         match msg {
-            StellarMessage::ErrorMsg(_) => {}
             StellarMessage::Hello(hello) => {
                 // update the node info based on the hello message
                 self.process_hello_message(hello)?;
@@ -62,7 +60,7 @@ impl Connector {
                 } else {
                     self.send_auth_message().await?;
                 }
-                println!("Done sending hello message.");
+                log::info!("Hello message processed successfully");
             }
 
             StellarMessage::Auth(_) => {
@@ -71,7 +69,7 @@ impl Connector {
 
             StellarMessage::SendMore(_) => {
                 // todo: what to do with send more?
-                println!("what to do with send more");
+                log::trace!("what to do with send more");
             }
             other => {
                 let sender = self
@@ -98,7 +96,7 @@ impl Connector {
             .as_ref()
             .ok_or(Error::ChannelNotSet)?;
 
-        println!("Handshake completed!!");
+        log::info!("Handshake completed");
         if let Some(remote) = self.remote.as_ref() {
             sender
                 .send(ConnectionState::Connect {

@@ -42,8 +42,6 @@ impl Connector {
     }
 
     pub(super) async fn send_auth_message(&mut self) -> Result<(), Error> {
-        println!("\n----------- SENDING AUTH MESSAGE: -------------");
-        let msg = create_auth_message();
-        self.send_stellar_message(msg).await
+        self.send_stellar_message(create_auth_message()).await
     }
 }

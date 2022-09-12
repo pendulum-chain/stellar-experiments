@@ -41,20 +41,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         if let Some(conn_state) = user_controls.recv().await {
             match conn_state {
                 ConnectionState::Connect { pub_key, node_info } => {
-                    println!(
+                    log::info!(
                         "Connected to Stellar Node: {:?}",
                         String::from_utf8(pub_key.to_encoding()).unwrap()
                     );
-                    println!("{:?}", node_info);
+                    log::info!("{:?}", node_info);
 
                     user_controls.send(StellarMessage::GetScpState(0)).await?;
                 }
                 ConnectionState::Data(p_id, msg) => match msg {
                     StellarMessage::ScpMessage(env) => {
-                        println!("\npid: {:?}  --> {:?}", p_id, env.statement.pledges);
+                        log::info!("\npid: {:?}  --> {:?}", p_id, env.statement.pledges);
                     }
                     other => {
-                        println!("\npid: {:?}  --> {:?}", p_id, other);
+                        log::info!("\npid: {:?}  --> {:?}", p_id, other);
                     }
                 },
                 ConnectionState::Error(_) => {}
