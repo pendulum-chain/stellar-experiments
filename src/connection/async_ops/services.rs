@@ -1,8 +1,10 @@
 use crate::async_ops::connector::{ConnectionState, Connector, ConnectorActions};
+
+use crate::async_ops::user_controls::UserControls;
 use crate::async_ops::Xdr;
 use crate::errors::Error;
+use crate::helper::time_now;
 use crate::{get_xdr_message_length, ReadState};
-use substrate_stellar_sdk::types::StellarMessage;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{tcp, TcpStream};
 use tokio::sync::mpsc;
@@ -20,24 +22,6 @@ pub async fn create_stream(
         .map_err(|e| Error::ConnectionFailed(e.to_string()))?;
 
     Ok(stream.into_split())
-}
-
-/// This service is for SENDING a stellar message to the server.
-/// # Arguments
-/// * `w_stream` - the write stream for writing the xdr stellar message
-/// * `rx_stream_writer` - the receiver where we get the stellar message from the user.
-async fn sending_service(
-    mut w_stream: tcp::OwnedWriteHalf,
-    mut rx_stream_writer: mpsc::Receiver<Xdr>,
-) -> Result<(), Error> {
-    loop {
-        if let Some((_, msg)) = rx_stream_writer.recv().await {
-            w_stream
-                .write_all(&msg)
-                .await
-                .map_err(|e| Error::WriteFailed(e.to_string()))?;
-        }
-    }
 }
 
 /// checks the length of the next stellar message.
@@ -148,46 +132,37 @@ async fn receiving_service(
     }
 }
 
-/// Where communication happens with the channels holding the stream.
+/// Where communication happens with the channels holding the write half of the stream.
+/// # Arguments
+/// * `w_stream` - the write stream for writing the xdr stellar message
+/// * `rx_stream_writer` - the receiver where we get the stellar message from the user.
 pub async fn comm_service(
     mut cfg: Connector,
     mut receiver: mpsc::Receiver<ConnectorActions>,
+    mut w_stream: tcp::OwnedWriteHalf,
 ) -> Result<(), Error> {
     loop {
         if let Some(actions) = receiver.recv().await {
             match actions {
                 ConnectorActions::SendMessage(msg) => {
-                    cfg.send_stellar_message(msg).await?;
+                    let xdr_msg = cfg.create_xdr_message(msg)?;
+                    w_stream
+                        .write_all(&xdr_msg)
+                        .await
+                        .map_err(|e| Error::WriteFailed(e.to_string()))?;
                 }
                 ConnectorActions::HandleMessage(xdr) => {
                     cfg.process_raw_message(xdr).await?;
                 }
                 ConnectorActions::SendHello => {
-                    cfg.send_hello_message().await?;
+                    let msg = cfg.create_hello_message(time_now())?;
+                    w_stream
+                        .write_all(&msg)
+                        .await
+                        .map_err(|e| Error::WriteFailed(e.to_string()))?;
                 }
             }
         }
-    }
-}
-
-pub struct UserControls {
-    /// This is when we want to send stellar messages
-    tx: mpsc::Sender<ConnectorActions>,
-    /// For receiving stellar messages
-    rx: mpsc::Receiver<ConnectionState>,
-}
-
-impl UserControls {
-    pub async fn send(&self, message: StellarMessage) -> Result<(), Error> {
-        self.tx
-            .send(ConnectorActions::SendMessage(message))
-            .await
-            .map_err(Error::from)
-    }
-
-    /// Receives Stellar messages from the connection.
-    pub async fn recv(&mut self) -> Option<ConnectionState> {
-        self.rx.recv().await
     }
 }
 
@@ -199,32 +174,24 @@ pub async fn connect(mut conn: Connector, addr: &str) -> Result<UserControls, Er
 
     // ------------------ prepare the channels
 
-    // this is a channel between the connector and the streams
-    let (xdr_forwarder, xdr_handler) = mpsc::channel::<Xdr>(1024);
-
     // this is a channel to communicate with the connection/config (this needs renaming)
     let (actions_sender, actions_receiver) = mpsc::channel::<ConnectorActions>(1024);
     // this is a chanel to communicate with the user/caller.
     let (message_writer, message_receiver) = mpsc::channel::<ConnectionState>(1024);
 
     // set the channel into the config.
-    conn.set_stream_writer(xdr_forwarder);
+    // conn.set_stream_writer(xdr_forwarder);
+    conn.set_sender_to_self(actions_sender.clone());
     conn.set_message_writer(message_writer);
-
-    // run the sending service
-    tokio::spawn(sending_service(wr, xdr_handler));
 
     // start the receiving_service
     tokio::spawn(receiving_service(rd, actions_sender.clone()));
 
     // run the conn communication
-    tokio::spawn(comm_service(conn, actions_receiver));
+    tokio::spawn(comm_service(conn, actions_receiver, wr));
 
     // start the handshake
     actions_sender.send(ConnectorActions::SendHello).await?;
 
-    Ok(UserControls {
-        tx: actions_sender,
-        rx: message_receiver,
-    })
+    Ok(UserControls::new(actions_sender, message_receiver))
 }
