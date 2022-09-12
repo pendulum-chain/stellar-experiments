@@ -3,7 +3,7 @@ mod authentication;
 pub mod errors;
 mod flow_controller;
 mod handshake;
-mod hmac_keys;
+mod hmac;
 
 pub use authentication::*;
 pub use handshake::*;

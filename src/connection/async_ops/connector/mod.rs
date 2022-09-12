@@ -4,14 +4,12 @@ mod message_sender;
 use crate::async_ops::Xdr;
 use crate::connection::flow_controller::FlowController;
 use crate::connection::handshake;
-use crate::connection::hmac_keys::HMacKeys;
+use crate::connection::hmac::{create_sha256_hmac, verify_hmac, HMacKeys};
 use crate::errors::Error;
-use crate::helper::{create_sha256_hmac, verify_hmac};
 use crate::node::{LocalInfo, RemoteInfo};
 use crate::{
     create_auth_cert, gen_shared_key, xdr_converter, ConnectionAuth, HandshakeState, NodeInfo,
 };
-use std::borrow::BorrowMut;
 use substrate_stellar_sdk::types::{
     AuthenticatedMessage, AuthenticatedMessageV0, Curve25519Public, HmacSha256Mac, StellarMessage,
 };
@@ -96,19 +94,16 @@ impl Connector {
         let sending_mac_key = self
             .hmac_keys
             .as_ref()
-            .map(|keys| keys.sending())
-            .unwrap_or(&empty);
+            .map(|keys| keys.sending().mac)
+            .unwrap_or([0; 32]);
 
         let mut buffer = self.local.sequence().to_be_bytes().to_vec();
         buffer.append(&mut message.to_xdr());
-        create_sha256_hmac(&buffer, &sending_mac_key.mac).unwrap_or(empty)
+        create_sha256_hmac(&buffer, &sending_mac_key).unwrap_or(empty)
     }
 
-    fn prepare_shared_key(
-        &mut self,
-        remote_pub_key_ecdh: &Curve25519Public,
-    ) -> Result<HmacSha256Mac, Error> {
-        let shared_key = match self
+    fn get_shared_key(&mut self, remote_pub_key_ecdh: &Curve25519Public) -> HmacSha256Mac {
+        match self
             .connection_auth
             .shared_key(remote_pub_key_ecdh, !self.remote_called_us)
         {
@@ -131,9 +126,7 @@ impl Connector {
             }
 
             Some(shared_key) => shared_key.clone(),
-        };
-
-        Ok(shared_key)
+        }
     }
 
     /// Verifies the AuthenticatedMessage, received from the Stellar Node
@@ -225,13 +218,5 @@ impl Connector {
 
     pub fn set_message_writer(&mut self, sender: mpsc::Sender<ConnectionState>) {
         self.stellar_message_writer = Some(sender);
-    }
-
-    pub(crate) fn stream_writer(&self) -> Option<&mpsc::Sender<ConnectorActions>> {
-        self.stream_writer.as_ref()
-    }
-
-    pub(crate) fn flow_controller(&mut self) -> &mut FlowController {
-        self.flow_controller.borrow_mut()
     }
 }

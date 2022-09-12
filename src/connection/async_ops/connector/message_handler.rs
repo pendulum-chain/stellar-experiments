@@ -1,5 +1,5 @@
 use crate::async_ops::{Connector, Xdr};
-use crate::connection::hmac_keys::HMacKeys;
+use crate::connection::hmac::HMacKeys;
 use crate::errors::Error;
 use crate::helper::time_now;
 use crate::node::RemoteInfo;
@@ -125,7 +125,7 @@ impl Connector {
         }
 
         let remote_info = RemoteInfo::new(&hello);
-        let shared_key = self.prepare_shared_key(&remote_info.pub_key_ecdh())?;
+        let shared_key = self.get_shared_key(&remote_info.pub_key_ecdh());
 
         self.hmac_keys = Some(HMacKeys::new(
             &shared_key,

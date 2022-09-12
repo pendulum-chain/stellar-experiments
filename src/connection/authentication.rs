@@ -1,7 +1,7 @@
 #![allow(dead_code)] //todo: remove after being tested and implemented
 
+use crate::connection::hmac::create_sha256_hmac;
 use crate::errors::Error;
-use crate::helper::create_sha256_hmac;
 use rand::Rng;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -266,12 +266,13 @@ mod test {
     };
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    use crate::connection::hmac::{create_sha256_hmac, verify_hmac};
     use crate::create_auth_cert;
     use crate::errors::Error;
-    use crate::helper::{create_sha256_hmac, generate_random_nonce, verify_hmac};
+    use crate::helper::generate_random_nonce;
     use substrate_stellar_sdk::network::Network;
     use substrate_stellar_sdk::types::{Curve25519Public, HmacSha256Mac};
-    use substrate_stellar_sdk::{PublicKey, SecretKey, XdrCodec};
+    use substrate_stellar_sdk::{SecretKey, XdrCodec};
 
     fn mock_connection_auth() -> ConnectionAuth {
         let public_network = Network::new(b"Public Global Stellar Network ; September 2015");

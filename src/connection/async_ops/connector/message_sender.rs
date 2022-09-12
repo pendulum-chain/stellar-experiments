@@ -8,7 +8,7 @@ use crate::errors::Error;
 impl Connector {
     /// Sends an xdr version of a wrapped AuthenticatedMessage ( StellarMessage ).
     async fn send_stellar_message(&mut self, msg: StellarMessage) -> Result<(), Error> {
-        let sender = self.stream_writer().ok_or(Error::ChannelNotSet)?;
+        let sender = self.stream_writer.as_ref().ok_or(Error::ChannelNotSet)?;
 
         sender
             .send(ConnectorActions::SendMessage(msg))
@@ -20,8 +20,7 @@ impl Connector {
         &mut self,
         message_type: MessageType,
     ) -> Result<(), Error> {
-        let flow_controller = self.flow_controller();
-        if !flow_controller.send_more(message_type) {
+        if !self.flow_controller.send_more(message_type) {
             return Ok(());
         }
 
@@ -33,7 +32,7 @@ impl Connector {
     }
 
     pub(super) async fn send_hello_message(&mut self) -> Result<(), Error> {
-        let sender = self.stream_writer().ok_or(Error::ChannelNotSet)?;
+        let sender = self.stream_writer.as_ref().ok_or(Error::ChannelNotSet)?;
 
         sender
             .send(ConnectorActions::SendHello)

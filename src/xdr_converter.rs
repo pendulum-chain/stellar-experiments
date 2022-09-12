@@ -137,9 +137,7 @@ fn get_message(data: &[u8], message_len: usize) -> (Vec<u8>, Vec<u8>) {
 mod test {
     use crate::xdr_converter::{
         get_message, get_xdr_message_length, is_xdr_complete_message, parse_authenticated_message,
-        Error,
     };
-    use substrate_stellar_sdk::types::StellarMessage;
 
     #[test]
     fn get_xdr_message_length_success() {
@@ -182,7 +180,7 @@ mod test {
         let len = get_xdr_message_length(&xdr_has_next_msg);
         let len = usize::try_from(len).unwrap();
 
-        let (nxt_msg, remaining) = get_message(&xdr_has_next_msg, len);
+        let (nxt_msg, _) = get_message(&xdr_has_next_msg, len);
 
         let str = base64::encode(nxt_msg);
         assert_eq!(
