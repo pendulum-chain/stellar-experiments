@@ -2,6 +2,7 @@ use crate::connection::errors::Error;
 use hmac::{Hmac, Mac};
 use rand::Rng;
 use sha2::{Digest, Sha256};
+use std::time::{SystemTime, UNIX_EPOCH};
 use substrate_stellar_sdk::types::{HmacSha256Mac, Uint256};
 use substrate_stellar_sdk::SecretKey;
 type Buffer = [u8; 32];
@@ -50,4 +51,12 @@ pub fn secret_key_binary(key: &str) -> [u8; 32] {
     let bytes = base64::decode_config(key, base64::STANDARD).unwrap();
     let secret_key = SecretKey::from_binary(bytes.try_into().unwrap());
     secret_key.into_binary()
+}
+
+pub fn time_now() -> u64 {
+    let valid_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis();
+    u64::try_from(valid_at).unwrap()
 }

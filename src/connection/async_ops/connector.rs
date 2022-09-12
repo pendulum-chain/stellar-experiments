@@ -1,8 +1,9 @@
-use crate::async_ops::flow_controller::{FlowController, MAX_FLOOD_MSG_CAP};
 use crate::async_ops::Xdr;
+use crate::connection::flow_controller::{FlowController, MAX_FLOOD_MSG_CAP};
 use crate::connection::handshake;
 use crate::errors::Error;
-use crate::helper::{create_sha256_hmac, generate_random_nonce, verify_hmac};
+use crate::helper::{create_sha256_hmac, verify_hmac};
+use crate::node::{LocalInfo, RemoteInfo};
 use crate::{
     create_auth_cert, create_auth_message, create_receiving_mac_key, create_sending_mac_key,
     gen_shared_key, parse_authenticated_message, verify_remote_auth_cert, xdr_converter,
@@ -10,8 +11,8 @@ use crate::{
 };
 use std::time::{SystemTime, UNIX_EPOCH};
 use substrate_stellar_sdk::types::{
-    AuthenticatedMessage, AuthenticatedMessageV0, Curve25519Public, Hello, HmacSha256Mac,
-    MessageType, SendMore, StellarMessage, Uint256,
+    AuthenticatedMessage, AuthenticatedMessageV0, Hello, HmacSha256Mac, MessageType, SendMore,
+    StellarMessage,
 };
 use substrate_stellar_sdk::{PublicKey, SecretKey, XdrCodec};
 use tokio::sync::mpsc;
@@ -21,7 +22,6 @@ pub enum ConnectorActions {
     SendHello,
     SendMessage(StellarMessage),
     HandleMessage(Xdr),
-    IncreaseRemoteSequence,
 }
 
 #[derive(Debug)]
@@ -36,16 +36,9 @@ pub enum ConnectionState {
 }
 
 pub struct Connector {
-    local_sequence: u64,
-    local_nonce: Uint256,
-    local_node: NodeInfo,
-    local_listening_port: u32,
+    local: LocalInfo,
+    remote: Option<RemoteInfo>,
 
-    remote_sequence: u64,
-    remote_pub_key_ecdh: Option<Curve25519Public>,
-    remote_pub_key: Option<PublicKey>,
-    remote_nonce: Option<Uint256>,
-    remote_node: Option<NodeInfo>,
     sending_mac_key: Option<HmacSha256Mac>,
     receiving_mac_key: Option<HmacSha256Mac>,
     connection_auth: ConnectionAuth,
@@ -78,12 +71,12 @@ impl Connector {
     /// Wraps the stellar message with `AuthenticatedMessage`
     fn authenticate_message(&mut self, message: StellarMessage) -> AuthenticatedMessage {
         let mac = self.mac_for_auth_message(&message);
-        let sequence = self.local_sequence;
+        let sequence = self.local.sequence();
 
         match &message {
             StellarMessage::ErrorMsg(_) | StellarMessage::Hello(_) => {}
             _ => {
-                self.local_sequence += 1;
+                self.local.increment_sequence();
             }
         }
 
@@ -100,13 +93,13 @@ impl Connector {
     fn mac_for_auth_message(&self, message: &StellarMessage) -> HmacSha256Mac {
         let empty = HmacSha256Mac { mac: [0; 32] };
 
-        if self.remote_pub_key_ecdh.is_none() || self.sending_mac_key.is_none() {
+        if self.remote.is_none() || self.sending_mac_key.is_none() {
             return empty;
         }
 
         let mac_key = self.sending_mac_key.as_ref().unwrap_or(&empty);
 
-        let mut buffer = self.local_sequence.to_be_bytes().to_vec();
+        let mut buffer = self.local.sequence().to_be_bytes().to_vec();
         buffer.append(&mut message.to_xdr());
         create_sha256_hmac(&buffer, &mac_key.mac).unwrap_or(empty)
     }
@@ -122,19 +115,19 @@ impl Connector {
 
         match msg_type {
             MessageType::Transaction if !self.receive_tx_messages => {
-                self.increment_remote_sequence();
+                self.increment_remote_sequence()?;
                 self.check_to_send_more(msg_type).await?;
             }
 
             MessageType::ScpMessage if !self.receive_scp_messages => {
-                self.remote_sequence += 1;
+                self.increment_remote_sequence()?;
             }
 
             _ => {
                 // we only verify the authenticated message when a handshake has been done.
                 if self.handshake_state >= HandshakeState::GotHello {
                     self.verify_auth(&auth_msg, &data[4..(data.len() - 32)])?;
-                    self.increment_remote_sequence();
+                    self.increment_remote_sequence()?;
                 }
                 self.process_stellar_message(message_id, auth_msg.message, msg_type)
                     .await?;
@@ -217,21 +210,21 @@ impl Connector {
             .ok_or(Error::ChannelNotSet)?;
 
         println!("Handshake completed!!");
-        sender
-            .send(ConnectionState::Connect {
-                pub_key: self.remote_pub_key.as_ref().unwrap().clone(),
-                node_info: self.remote_node.as_ref().unwrap().clone(),
-            })
-            .await?;
+        if let Some(remote) = self.remote.as_ref() {
+            sender
+                .send(ConnectionState::Connect {
+                    pub_key: remote.pub_key().clone(),
+                    node_info: remote.node().clone(),
+                })
+                .await?;
 
-        let remote_node_info = self.remote_node.as_ref().ok_or(Error::Undefined(
-            "No remote overlay version after handshake".to_string(),
-        ))?;
-
-        self.flow_controller.enable(
-            self.local_node.overlay_version,
-            remote_node_info.overlay_version,
-        );
+            self.flow_controller.enable(
+                self.local.node().overlay_version,
+                remote.node().overlay_version,
+            );
+        } else {
+            log::warn!("No remote overlay version after handshake.");
+        }
 
         self.check_to_send_more(MessageType::Auth).await
     }
@@ -250,24 +243,11 @@ impl Connector {
             return Err(Error::AuthCertInvalid);
         }
 
-        self.update_remote_info(&hello);
+        self.remote = Some(RemoteInfo::new(&hello));
         self.set_sending_mac_key()?;
         self.set_receiving_mac_key()?;
 
         Ok(())
-    }
-
-    fn update_remote_info(&mut self, hello: &Hello) {
-        self.remote_nonce = Some(hello.nonce);
-        self.remote_pub_key_ecdh = Some(hello.cert.pubkey.clone());
-        self.remote_pub_key = Some(hello.peer_id.clone());
-        self.remote_node = Some(NodeInfo {
-            ledger_version: hello.ledger_version,
-            overlay_version: hello.overlay_version,
-            overlay_min_version: hello.overlay_min_version,
-            version_str: hello.version_str.get_vec().clone(),
-            network_id: hello.network_id,
-        });
     }
 
     fn set_sending_mac_key(&mut self) -> Result<(), Error> {
@@ -275,9 +255,11 @@ impl Connector {
 
         self.sending_mac_key = Some(create_sending_mac_key(
             &shared_key,
-            self.local_nonce,
-            self.remote_nonce
-                .ok_or(Error::Undefined("remote_nonce".to_owned()))?,
+            self.local.nonce(),
+            self.remote
+                .as_ref()
+                .ok_or(Error::Undefined("remote_nonce".to_owned()))?
+                .nonce(),
             !self.remote_called_us,
         ));
 
@@ -288,9 +270,11 @@ impl Connector {
         let shared_key = self.prepare_shared_key()?;
         self.receiving_mac_key = Some(create_receiving_mac_key(
             &shared_key,
-            self.local_nonce,
-            self.remote_nonce
-                .ok_or(Error::Undefined("remote_nonce".to_owned()))?,
+            self.local.nonce(),
+            self.remote
+                .as_ref()
+                .ok_or(Error::Undefined("remote_nonce".to_owned()))?
+                .nonce(),
             !self.remote_called_us,
         ));
 
@@ -298,10 +282,10 @@ impl Connector {
     }
 
     fn prepare_shared_key(&mut self) -> Result<HmacSha256Mac, Error> {
-        let remote_pub_key_ecdh = self
-            .remote_pub_key_ecdh
-            .as_ref()
-            .ok_or(Error::Undefined("remote_pub_key_ecdh".to_owned()))?;
+        let remote_pub_key_ecdh = self.remote.as_ref().unwrap().pub_key_ecdh();
+
+        // .as_ref()
+        // .ok_or(Error::Undefined("remote_pub_key_ecdh".to_owned()))?;
 
         let shared_key = match self
             .connection_auth
@@ -337,7 +321,9 @@ impl Connector {
         //     "remote sequence: {:?}, auth sequence: {:?}",
         //     self.remote_sequence, auth_msg.sequence
         // );
-        if self.remote_sequence != auth_msg.sequence {
+
+        let remote = self.remote.as_ref().ok_or(Error::NoRemoteInfo)?;
+        if remote.sequence() != auth_msg.sequence {
             //must be handled on main thread because workers could mix up order of messages.
             return Err(Error::InvalidSequenceNumber);
         }
@@ -377,10 +363,10 @@ impl Connector {
 
         handshake::create_hello_message(
             peer_id.clone(),
-            self.local_nonce,
+            self.local.nonce(),
             auth_cert,
-            self.local_listening_port,
-            &self.local_node,
+            self.local.port(),
+            &self.local.node(),
         )
     }
 
@@ -396,8 +382,11 @@ impl Connector {
         self.send_stellar_message(hello).await
     }
 
-    pub(crate) fn increment_remote_sequence(&mut self) {
-        self.remote_sequence += 1;
+    fn increment_remote_sequence(&mut self) -> Result<(), Error> {
+        self.remote
+            .as_mut()
+            .map(|remote| remote.increment_sequence())
+            .ok_or(Error::NoRemoteInfo)
     }
 
     pub fn new(
@@ -411,15 +400,8 @@ impl Connector {
             ConnectionAuth::new(&local_node.network_id, keypair, auth_cert_expiration);
 
         Connector {
-            local_sequence: 0,
-            local_nonce: generate_random_nonce(),
-            local_node,
-            local_listening_port: 11625,
-            remote_sequence: 0,
-            remote_pub_key_ecdh: None,
-            remote_pub_key: None,
-            remote_nonce: None,
-            remote_node: None,
+            local: LocalInfo::new(local_node),
+            remote: None,
             sending_mac_key: None,
             receiving_mac_key: None,
             connection_auth,

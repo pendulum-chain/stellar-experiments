@@ -29,11 +29,17 @@ pub enum Error {
     #[error(display = "No Response from Stellar Node")]
     NoResponse, // No data left in the buffer
 
+    #[error(display = "The Remote Node Info wasn't initialized.")]
+    NoRemoteInfo,
+
     #[error(display = "Sequence num with the Auth message is different with remote sequence")]
     InvalidSequenceNumber,
 
     #[error(display = "Hmac: {:?}", _0)]
     HmacError(hmac::digest::MacError),
+
+    #[error(display = "The Hmac Key is ivalide")]
+    MissingHmacKeys,
 
     #[error(display = "Hmac: Invalid Length")]
     HmacInvalidLength,

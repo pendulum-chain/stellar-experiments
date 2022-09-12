@@ -165,10 +165,6 @@ pub async fn comm_service(
                 ConnectorActions::SendHello => {
                     cfg.send_hello_message().await?;
                 }
-                ConnectorActions::IncreaseRemoteSequence => {
-                    cfg.increment_remote_sequence();
-                    //cfg.check_to_send_more()
-                }
             }
         }
     }

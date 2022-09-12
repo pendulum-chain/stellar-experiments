@@ -1,6 +1,12 @@
 use crate::BinarySha256Hash;
 use substrate_stellar_sdk::network::Network;
 
+mod local;
+mod remote;
+
+pub use local::*;
+pub use remote::*;
+
 pub type NetworkId = [u8; 32];
 
 #[derive(Debug, Clone)]
