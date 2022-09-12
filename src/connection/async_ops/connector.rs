@@ -1,36 +1,39 @@
+use crate::async_ops::flow_controller::{FlowController, MAX_FLOOD_MSG_CAP};
 use crate::async_ops::Xdr;
-use crate::connection::{handshake, Error};
+use crate::connection::handshake;
+use crate::errors::Error;
 use crate::helper::{create_sha256_hmac, generate_random_nonce, verify_hmac};
 use crate::{
     create_auth_cert, create_auth_message, create_receiving_mac_key, create_sending_mac_key,
     gen_shared_key, parse_authenticated_message, verify_remote_auth_cert, xdr_converter,
-    Connection, ConnectionAuth, HandshakeState, NodeInfo,
+    ConnectionAuth, HandshakeState, NodeInfo,
 };
 use std::time::{SystemTime, UNIX_EPOCH};
-use substrate_stellar_sdk::types::{AuthenticatedMessage, AuthenticatedMessageV0, Curve25519Public, Hello, HmacSha256Mac, MessageType, SendMore, StellarMessage, Uint256};
+use substrate_stellar_sdk::types::{
+    AuthenticatedMessage, AuthenticatedMessageV0, Curve25519Public, Hello, HmacSha256Mac,
+    MessageType, SendMore, StellarMessage, Uint256,
+};
 use substrate_stellar_sdk::{PublicKey, SecretKey, XdrCodec};
-use tokio::sync::{mpsc, oneshot};
-use crate::async_ops::flow_controller::{FlowController, MAX_FLOOD_MSG_CAP};
+use tokio::sync::mpsc;
 
 #[derive(Debug)]
 pub enum ConnectorActions {
     SendHello,
     SendMessage(StellarMessage),
     HandleMessage(Xdr),
-    IncreaseRemoteSequence
+    IncreaseRemoteSequence,
 }
 
 #[derive(Debug)]
 pub enum ConnectionState {
-    Connect{
-        pub_key:PublicKey,
-        node_info:NodeInfo
+    Connect {
+        pub_key: PublicKey,
+        node_info: NodeInfo,
     },
     Data(u32, StellarMessage),
     Error(String),
-    Timeout
+    Timeout,
 }
-
 
 pub struct Connector {
     local_sequence: u64,
@@ -69,7 +72,7 @@ impl Connector {
         let xdr_msg = xdr_converter::from_authenticated_message(&auth_msg)?;
 
         let sender = self.stream_writer.as_ref().ok_or(Error::ChannelNotSet)?;
-        sender.send((0,xdr_msg)).await.map_err(Error::from)
+        sender.send((0, xdr_msg)).await.map_err(Error::from)
     }
 
     /// Wraps the stellar message with `AuthenticatedMessage`
@@ -105,11 +108,11 @@ impl Connector {
 
         let mut buffer = self.local_sequence.to_be_bytes().to_vec();
         buffer.append(&mut message.to_xdr());
-        create_sha256_hmac(&buffer, &mac_key.mac)
+        create_sha256_hmac(&buffer, &mac_key.mac).unwrap_or(empty)
     }
 
     /// Processes the raw bytes from the stream
-    pub(crate) async fn process_raw_message(&mut self, xdr:Xdr) -> Result<(), Error> {
+    pub(crate) async fn process_raw_message(&mut self, xdr: Xdr) -> Result<(), Error> {
         let (message_id, data) = xdr;
         // println!(
         //     "pid: {:?} process_raw_message:  remote_seq: {:?}",
@@ -117,12 +120,10 @@ impl Connector {
         // );
         let (auth_msg, msg_type) = parse_authenticated_message(&data)?;
 
-
         match msg_type {
             MessageType::Transaction if !self.receive_tx_messages => {
                 self.increment_remote_sequence();
                 self.check_to_send_more(msg_type).await?;
-
             }
 
             MessageType::ScpMessage if !self.receive_scp_messages => {
@@ -135,14 +136,20 @@ impl Connector {
                     self.verify_auth(&auth_msg, &data[4..(data.len() - 32)])?;
                     self.increment_remote_sequence();
                 }
-                self.process_stellar_message(message_id, auth_msg.message, msg_type).await?;
+                self.process_stellar_message(message_id, auth_msg.message, msg_type)
+                    .await?;
             }
         }
         Ok(())
     }
 
     /// Handles what to do next with the message. Mostly it will be sent back to the user
-    async fn process_stellar_message(&mut self, message_id:u32, msg: StellarMessage, msg_type:MessageType) -> Result<(), Error> {
+    async fn process_stellar_message(
+        &mut self,
+        message_id: u32,
+        msg: StellarMessage,
+        msg_type: MessageType,
+    ) -> Result<(), Error> {
         match msg {
             StellarMessage::ErrorMsg(_) => {}
             StellarMessage::Hello(hello) => {
@@ -163,7 +170,7 @@ impl Connector {
                 self.process_auth_message().await?;
             }
 
-            StellarMessage::SendMore(x) => {
+            StellarMessage::SendMore(_) => {
                 // todo: what to do with send more?
                 println!("what to do with send more");
             }
@@ -172,28 +179,33 @@ impl Connector {
                     .stellar_message_writer
                     .as_ref()
                     .ok_or(Error::ChannelNotSet)?;
-                sender.send(ConnectionState::Data(message_id,other)).await?;
+                sender
+                    .send(ConnectionState::Data(message_id, other))
+                    .await?;
                 self.check_to_send_more(msg_type).await?;
             }
         }
         Ok(())
     }
 
-    pub(crate) async fn check_to_send_more(&mut self, message_type:MessageType) -> Result<(),Error> {
+    pub(crate) async fn check_to_send_more(
+        &mut self,
+        message_type: MessageType,
+    ) -> Result<(), Error> {
         if !self.flow_controller.send_more(message_type) {
             return Ok(());
         }
 
         println!("\n----------- SENDING SENDMORE MESSAGE: -------------");
 
-        let msg =  StellarMessage::SendMore(SendMore {
-            num_messages: MAX_FLOOD_MSG_CAP
+        let msg = StellarMessage::SendMore(SendMore {
+            num_messages: MAX_FLOOD_MSG_CAP,
         });
 
         self.send_stellar_message(msg).await
     }
 
-    async fn process_auth_message(&mut self) -> Result<(),Error> {
+    async fn process_auth_message(&mut self) -> Result<(), Error> {
         if self.remote_called_us {
             self.send_auth_message().await?;
         }
@@ -205,17 +217,20 @@ impl Connector {
             .ok_or(Error::ChannelNotSet)?;
 
         println!("Handshake completed!!");
-        sender.send(ConnectionState::Connect {
-            pub_key: self.remote_pub_key.as_ref().unwrap().clone(),
-            node_info: self.remote_node.as_ref().unwrap().clone()
-        }).await?;
+        sender
+            .send(ConnectionState::Connect {
+                pub_key: self.remote_pub_key.as_ref().unwrap().clone(),
+                node_info: self.remote_node.as_ref().unwrap().clone(),
+            })
+            .await?;
 
-        let remote_node_info = self.remote_node.as_ref()
-            .ok_or(Error::Undefined("No remote overlay version after handshake".to_string()))?;
+        let remote_node_info = self.remote_node.as_ref().ok_or(Error::Undefined(
+            "No remote overlay version after handshake".to_string(),
+        ))?;
 
         self.flow_controller.enable(
             self.local_node.overlay_version,
-            remote_node_info.overlay_version
+            remote_node_info.overlay_version,
         );
 
         self.check_to_send_more(MessageType::Auth).await
@@ -328,8 +343,7 @@ impl Connector {
         }
 
         if let Some(recv_mac_key) = &self.receiving_mac_key {
-            verify_hmac(body, &recv_mac_key.mac, &auth_msg.mac.to_xdr())
-                .map_err(|_| Error::InvalidHmac)?;
+            verify_hmac(body, &recv_mac_key.mac, &auth_msg.mac.to_xdr())?;
         }
         Ok(())
     }
@@ -383,7 +397,7 @@ impl Connector {
     }
 
     pub(crate) fn increment_remote_sequence(&mut self) {
-        self.remote_sequence +=1;
+        self.remote_sequence += 1;
     }
 
     pub fn new(

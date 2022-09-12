@@ -1,10 +1,7 @@
 pub mod async_ops;
 mod authentication;
-mod connection;
-mod errors;
+pub mod errors;
 mod handshake;
 
 pub use authentication::*;
-pub use connection::*;
-pub use errors::*;
 pub use handshake::*;

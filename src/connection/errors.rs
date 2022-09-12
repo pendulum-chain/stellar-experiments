@@ -1,7 +1,6 @@
 #![allow(dead_code)] //todo: remove after being tested and implemented
 
 use crate::xdr_converter::Error as XDRError;
-use substrate_stellar_sdk::types::StellarMessage;
 use tokio::sync;
 
 #[derive(Debug, Eq, PartialEq, err_derive::Error)]
@@ -33,11 +32,11 @@ pub enum Error {
     #[error(display = "Sequence num with the Auth message is different with remote sequence")]
     InvalidSequenceNumber,
 
-    #[error(display = "Verify error: Invalid Hmac")]
-    InvalidHmac,
-
     #[error(display = "Hmac: {:?}", _0)]
     HmacError(hmac::digest::MacError),
+
+    #[error(display = "Hmac: Invalid Length")]
+    HmacInvalidLength,
 
     #[error(display = "Undefined: {}", _0)]
     Undefined(String),

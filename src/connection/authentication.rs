@@ -1,11 +1,10 @@
 #![allow(dead_code)] //todo: remove after being tested and implemented
 
+use crate::errors::Error;
+use crate::helper::create_sha256_hmac;
 use rand::Rng;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-
-use crate::connection::Error;
-use crate::helper::create_sha256_hmac;
 use substrate_stellar_sdk::types::{
     AuthCert, Curve25519Public, EnvelopeType, HmacSha256Mac, Signature, Uint256,
 };
@@ -151,7 +150,7 @@ pub fn gen_shared_key(
         final_buffer.extend_from_slice(&pub_key_ecdh.key);
     }
 
-    create_sha256_hmac(&final_buffer, &[0; 32])
+    create_sha256_hmac(&final_buffer, &[0; 32]).unwrap_or(HmacSha256Mac { mac: [0; 32] })
 }
 
 pub fn create_sending_mac_key(
@@ -175,7 +174,7 @@ pub fn create_sending_mac_key(
     buf.append(&mut remote_n);
     buf.append(&mut vec![1]);
 
-    create_sha256_hmac(&buf, &shared_key.mac)
+    create_sha256_hmac(&buf, &shared_key.mac).unwrap_or(HmacSha256Mac { mac: [0; 32] })
 }
 
 pub fn create_receiving_mac_key(
@@ -199,7 +198,7 @@ pub fn create_receiving_mac_key(
     buf.append(&mut local_n);
     buf.append(&mut vec![1]);
 
-    create_sha256_hmac(&buf, &shared_key.mac)
+    create_sha256_hmac(&buf, &shared_key.mac).unwrap_or(HmacSha256Mac { mac: [0; 32] })
 }
 
 pub fn create_auth_cert(
@@ -221,10 +220,10 @@ pub fn create_auth_cert(
     let mut hash = Sha256::new();
     hash.update(buf);
 
-    let sha256RawSigData = hash.finalize().to_vec();
+    let raw_sig_data = hash.finalize().to_vec();
 
     let signature: Signature =
-        Signature::new(keypair.create_signature(sha256RawSigData).to_vec()).unwrap();
+        Signature::new(keypair.create_signature(raw_sig_data).to_vec()).unwrap();
 
     AuthCert {
         pubkey: pub_key_ecdh,
@@ -267,11 +266,11 @@ mod test {
     };
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use crate::connection::Error;
     use crate::create_auth_cert;
+    use crate::errors::Error;
     use crate::helper::{create_sha256_hmac, generate_random_nonce, verify_hmac};
     use substrate_stellar_sdk::network::Network;
-    use substrate_stellar_sdk::types::Curve25519Public;
+    use substrate_stellar_sdk::types::{Curve25519Public, HmacSha256Mac};
     use substrate_stellar_sdk::{PublicKey, SecretKey, XdrCodec};
 
     fn mock_connection_auth() -> ConnectionAuth {
@@ -437,7 +436,8 @@ mod test {
         };
 
         let mac_peer_uses_to_send_us_msg =
-            create_sha256_hmac(&data_message(), &peer_sending_mac_key.mac);
+            create_sha256_hmac(&data_message(), &peer_sending_mac_key.mac)
+                .unwrap_or(HmacSha256Mac { mac: [0; 32] });
 
         assert!(verify_hmac(
             &data_message(),                   // 3

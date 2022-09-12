@@ -1,14 +1,8 @@
 mod connector;
-mod services;
 mod flow_controller;
+mod services;
 
 pub use connector::*;
 pub use services::*;
 
-type Xdr = (u32,Vec<u8>);
-
-#[derive(Debug, Clone)]
-enum Direction {
-    ForStream,
-    ForConnector,
-}
+type Xdr = (u32, Vec<u8>);

@@ -1,13 +1,10 @@
 #![allow(dead_code)] //todo: remove after being tested and implemented
 
-use base64::DecodeError;
 use std::fmt::Debug;
 use substrate_stellar_sdk::types::{
-    AuthenticatedMessage, AuthenticatedMessageV0, DontHave, HmacSha256Mac, MessageType,
-    StellarMessage,
+    AuthenticatedMessage, AuthenticatedMessageV0, HmacSha256Mac, MessageType, StellarMessage,
 };
-use substrate_stellar_sdk::{SecretKey, XdrCodec};
-use thiserror::Error;
+use substrate_stellar_sdk::XdrCodec;
 
 #[derive(Debug, Eq, PartialEq, err_derive::Error)]
 pub enum Error {
@@ -21,10 +18,18 @@ pub enum Error {
     DecodeError(String),
 }
 
-pub fn secret_key_binary(key: &str) -> [u8; 32] {
-    let bytes = base64::decode_config(key, base64::STANDARD).unwrap();
-    let secret_key = SecretKey::from_binary(bytes.try_into().unwrap());
-    secret_key.into_binary()
+/// The 1st 4 bytes determines the byte length of the next stellar message.
+/// Returns 0 if the array of u8 is less than 4 bytes, or exceeds the max of u32.
+pub fn get_xdr_message_length(data: &[u8]) -> usize {
+    if data.len() < 4 {
+        return 0;
+    }
+
+    let mut message_len = data[0..4].to_vec();
+    message_len[0] &= 0x7f;
+
+    let len = u32::from_be_bytes(message_len.try_into().unwrap_or([0, 0, 0, 0]));
+    usize::try_from(len).unwrap_or(0)
 }
 
 /// Returns xdr of the authenticated message
@@ -47,6 +52,8 @@ macro_rules! _stellar_message {
     }};
 }
 
+/// Parses the xdr message into `AuthenticatedMessageV0`.
+/// When successful, returns a tuple of the message and the `MessageType`.
 pub fn parse_authenticated_message(
     xdr_message: &[u8],
 ) -> Result<(AuthenticatedMessageV0, MessageType), Error> {
@@ -67,40 +74,6 @@ pub fn parse_authenticated_message(
         },
         msg_type,
     ))
-}
-
-pub fn get_xdr_message_length(data: &[u8]) -> usize {
-    if data.len() < 4 {
-        return 0;
-    }
-
-    let mut message_len = data[0..4].to_vec();
-    message_len[0] &= 0x7f;
-
-
-    let len =  u32::from_be_bytes(
-        message_len.try_into().unwrap_or([0,0,0,0])
-    );
-
-    usize::try_from(len).unwrap_or(0)
-}
-
-
-
-pub fn  is_xdr_complete_message(data:&[u8], message_len:usize) -> bool {
-    return data.len() - 4 >= message_len
-}
-
-pub fn get_message(data:&[u8], message_len:usize) -> (Vec<u8>, Vec<u8>) {
-    (
-        data[4..(message_len + 4)].to_owned(),
-        data[0..(message_len + 4)].to_owned()
-    )
-}
-
-
-fn log_decode_error<T: Debug>(source: &str, error: T) -> Error {
-    Error::DecodeError(source.to_string())
 }
 
 fn parse_stellar_message(xdr_message: &[u8]) -> Result<StellarMessage, Error> {
@@ -142,9 +115,30 @@ fn message_to_bytes<T: XdrCodec>(message: &T) -> Result<Vec<u8>, Error> {
     Ok(buffer)
 }
 
+fn log_decode_error<T: Debug>(source: &str, error: T) -> Error {
+    log::error!("decode error: {:?}", error);
+    Error::DecodeError(source.to_string())
+}
+
+// extra function.
+fn is_xdr_complete_message(data: &[u8], message_len: usize) -> bool {
+    return data.len() - 4 >= message_len;
+}
+
+// extra function
+fn get_message(data: &[u8], message_len: usize) -> (Vec<u8>, Vec<u8>) {
+    (
+        data[4..(message_len + 4)].to_owned(),
+        data[0..(message_len + 4)].to_owned(),
+    )
+}
+
 #[cfg(test)]
 mod test {
-    use crate::xdr_converter::{get_xdr_message_length, parse_authenticated_message, Error, is_xdr_complete_message, get_message};
+    use crate::xdr_converter::{
+        get_message, get_xdr_message_length, is_xdr_complete_message, parse_authenticated_message,
+        Error,
+    };
     use substrate_stellar_sdk::types::StellarMessage;
 
     #[test]
@@ -167,7 +161,6 @@ mod test {
 
     #[test]
     fn message_not_complete_check() {
-
         let xdr_no_next_msg = base64::decode_config(
             "gAABaAAAAAAAAAAAAAAAAgAAAAsAAAAAAsUlnka7dHFfp69mUW6kEQ18IpsXLwcYk6yphpesUysAAAAAAULT7wAAAAN1tE4FkHboorc8QsJU7+LkIN2zbNK9MrkY49OpVcEzDwAAAAIAAAAw/0TiDQ==",
             base64::STANDARD
@@ -176,7 +169,7 @@ mod test {
         let len = get_xdr_message_length(&xdr_no_next_msg);
 
         let len = usize::try_from(len).unwrap();
-        assert!(!is_xdr_complete_message(&xdr_no_next_msg,len ));
+        assert!(!is_xdr_complete_message(&xdr_no_next_msg, len));
     }
 
     #[test]
@@ -189,13 +182,12 @@ mod test {
         let len = get_xdr_message_length(&xdr_has_next_msg);
         let len = usize::try_from(len).unwrap();
 
-        let (nxt_msg, remaining) = get_message(&xdr_has_next_msg,len);
+        let (nxt_msg, remaining) = get_message(&xdr_has_next_msg, len);
 
-        let str= base64::encode(nxt_msg);
-        assert_eq!(&str,"AAAAAAAAAAAAAAAAAAAAAgAAAAC/aoTd2LELdQcdmYVdAY+WJn3SCHECI7kLh9gb8bgR6g==");
-
-
-
+        let str = base64::encode(nxt_msg);
+        assert_eq!(
+            &str,
+            "AAAAAAAAAAAAAAAAAAAAAgAAAAC/aoTd2LELdQcdmYVdAY+WJn3SCHECI7kLh9gb8bgR6g=="
+        );
     }
-
 }
