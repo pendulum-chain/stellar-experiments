@@ -8,12 +8,13 @@ use crate::connection::hmac::{create_sha256_hmac, verify_hmac, HMacKeys};
 use crate::errors::Error;
 use crate::node::{LocalInfo, RemoteInfo};
 use crate::{
-    create_auth_cert, gen_shared_key, xdr_converter, ConnectionAuth, HandshakeState, NodeInfo,
+    create_auth_cert, gen_shared_key, xdr_converter, Config, ConnectionAuth, HandshakeState,
+    NodeInfo,
 };
 use substrate_stellar_sdk::types::{
     AuthenticatedMessage, AuthenticatedMessageV0, Curve25519Public, HmacSha256Mac, StellarMessage,
 };
-use substrate_stellar_sdk::{PublicKey, SecretKey, XdrCodec};
+use substrate_stellar_sdk::{PublicKey, XdrCodec};
 use tokio::sync::mpsc;
 
 #[derive(Debug)]
@@ -182,28 +183,28 @@ impl Connector {
 
     pub fn new(
         local_node: NodeInfo,
-        keypair: SecretKey,
-        auth_cert_expiration: u64,
-        remote_called_us: bool,
+        cfg: Config,
         send_to_self: mpsc::Sender<ConnectorActions>,
-        send_to_user: mpsc::Sender<ConnectionState>
+        send_to_user: mpsc::Sender<ConnectionState>,
     ) -> Self {
-        let connection_auth =
-            ConnectionAuth::new(&local_node.network_id, keypair, auth_cert_expiration);
+        let connection_auth = ConnectionAuth::new(
+            &local_node.network_id,
+            cfg.keypair(),
+            cfg.auth_cert_expiration,
+        );
 
         Connector {
             local: LocalInfo::new(local_node),
             remote: None,
             hmac_keys: None,
             connection_auth,
-            remote_called_us,
-            receive_tx_messages: false,
-            receive_scp_messages: true,
+            remote_called_us: cfg.remote_called_us,
+            receive_tx_messages: cfg.recv_scp_messages,
+            receive_scp_messages: cfg.recv_scp_messages,
             handshake_state: HandshakeState::Connecting,
             flow_controller: FlowController::default(),
             stream_writer: send_to_self,
             stellar_message_writer: send_to_user,
         }
     }
-
 }

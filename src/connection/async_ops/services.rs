@@ -1,11 +1,10 @@
-use substrate_stellar_sdk::SecretKey;
 use crate::async_ops::connector::{ConnectionState, Connector, ConnectorActions};
 
 use crate::async_ops::user_controls::UserControls;
 use crate::async_ops::Xdr;
 use crate::errors::Error;
 use crate::helper::time_now;
-use crate::{get_xdr_message_length, NodeInfo, ReadState};
+use crate::{get_xdr_message_length, Config, NodeInfo, ReadState};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{tcp, TcpStream};
 use tokio::sync::mpsc;
@@ -254,13 +253,9 @@ pub async fn connection_handler(
 
 /// Triggers connection to the Stellar Node.
 /// Returns the UserControls for the user to send and receive Stellar messages.
-pub async fn connect( local_node: NodeInfo,
-                      keypair: SecretKey,
-                      auth_cert_expiration: u64,
-                      remote_called_us: bool,
-                      addr: &str) -> Result<UserControls, Error> {
+pub async fn connect(local_node: NodeInfo, cfg: Config) -> Result<UserControls, Error> {
     // split the stream for easy handling of read and write
-    let (rd, wr) = create_stream(addr).await?;
+    let (rd, wr) = create_stream(&cfg.address()).await?;
 
     // ------------------ prepare the channels
 
@@ -269,8 +264,7 @@ pub async fn connect( local_node: NodeInfo,
     // this is a chanel to communicate with the user/caller.
     let (message_writer, message_receiver) = mpsc::channel::<ConnectionState>(1024);
 
-    let conn = Connector::new(local_node, keypair, auth_cert_expiration, remote_called_us,actions_sender.clone(),message_writer);
-
+    let conn = Connector::new(local_node, cfg, actions_sender.clone(), message_writer);
 
     // start the receiving_service
     tokio::spawn(receiving_service(rd, actions_sender.clone()));

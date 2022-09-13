@@ -39,15 +39,39 @@ pub fn from_authenticated_message(message: &AuthenticatedMessage) -> Result<Vec<
 
 /// To easily convert a message into a StellarMessage
 macro_rules! _stellar_message {
-    (&$ref:ident, $struct_str:ident) => {{
-        use crate::xdr_converter::log_decode_error;
-        use substrate_stellar_sdk::types::$struct_str;
+    ($ref:ident, $struct_str:ident) => {{
+        use crate::xdr_converter::{log_decode_error, Error};
+        use substrate_stellar_sdk::types::{$struct_str, StellarMessage};
         use substrate_stellar_sdk::XdrCodec;
 
         let ret: Result<StellarMessage, Error> = $struct_str::from_xdr($ref)
             .map(|msg| StellarMessage::$struct_str(msg))
             .map_err(|e| log_decode_error(stringify!($struct_str), e));
+        ret
+    }};
+}
 
+/// To easily convert any bytes to a Stellar type.
+///
+/// # Examples
+///
+/// Basic usage:
+///
+/// ```
+/// let auth_xdr =  [0, 0, 0, 1];
+/// let result = parse_stellar_type!(auth_xdr,Auth);
+/// assert_eq!(result, Ok(Auth { unused: 1 }))
+/// ```
+macro_rules! parse_stellar_type {
+    ($ref:ident, $struct_str:ident) => {{
+        use crate::xdr_converter::Error;
+        use substrate_stellar_sdk::types::$struct_str;
+        use substrate_stellar_sdk::XdrCodec;
+
+        let ret: Result<$struct_str, Error> = $struct_str::from_xdr($ref).map_err(|e| {
+            log::error!("decode error: {:?}", e);
+            Error::DecodeError(stringify!($struct_str).to_string())
+        });
         ret
     }};
 }
@@ -77,7 +101,7 @@ pub fn parse_authenticated_message(
 }
 
 fn parse_stellar_message(xdr_message: &[u8]) -> Result<StellarMessage, Error> {
-    StellarMessage::from_xdr(xdr_message).map_err(|e| log_decode_error("StellarMessage", e))
+    parse_stellar_type!(xdr_message, StellarMessage)
 }
 
 fn parse_message_version(xdr_message: &[u8]) -> Result<u32, Error> {
@@ -89,11 +113,11 @@ fn parse_sequence(xdr_message: &[u8]) -> Result<u64, Error> {
 }
 
 fn parse_hmac(xdr_message: &[u8]) -> Result<HmacSha256Mac, Error> {
-    HmacSha256Mac::from_xdr(xdr_message).map_err(|e| log_decode_error("Hmac", e))
+    parse_stellar_type!(xdr_message, HmacSha256Mac)
 }
 
 fn parse_message_type(xdr_message: &[u8]) -> Result<MessageType, Error> {
-    MessageType::from_xdr(&xdr_message).map_err(|e| log_decode_error("Message Type", e))
+    parse_stellar_type!(xdr_message, MessageType)
 }
 
 /// Returns XDR format of the message or
@@ -135,9 +159,12 @@ fn get_message(data: &[u8], message_len: usize) -> (Vec<u8>, Vec<u8>) {
 
 #[cfg(test)]
 mod test {
+    use crate::create_auth_message;
     use crate::xdr_converter::{
         get_message, get_xdr_message_length, is_xdr_complete_message, parse_authenticated_message,
     };
+    use substrate_stellar_sdk::types::Auth;
+    use substrate_stellar_sdk::XdrCodec;
 
     #[test]
     fn get_xdr_message_length_success() {
@@ -173,7 +200,7 @@ mod test {
         let xdr_has_next_msg = base64::decode_config(
             "gAAANAAAAAAAAAAAAAAAAAAAAAIAAAAAv2qE3dixC3UHHZmFXQGPliZ90ghxAiO5C4fYG/G4EeqAAANUAAAAAAAAAAAAAAABAAAABQAAADIAAAAAqTm9CAAALWkAAAAAAAAAAKkvb34AAC1pAAAAAAAAAAA23YxJAAAtaQAAAAAAAAAANDdVmQAALWkAAAAAAAAAAKkzSDUAAC1pAAAAAAAAAACer1MIAAAtaQAAAAAAAAAAI8ZHBAAALWkAAAAAAAAAACPGQFcAAC1pAAAAAAAAAACCxkWYAAAtaQAAAAAAAAAAaxSf6AAALWkAAAAAAAAAACv/s4IAAC1pAAAAAAAAAAA2TpjFAAAtaQAAAAAAAAAAsj7l8gAALWkAAAAAAAAAALhIZ40AAC1pAAAAAAAAAACeQEz9AAAtaQAAAAAAAAAAq2DFJwAALWkAAAAAAAAAADZKcDEAAC1pAAAAAAAAAAAnPPzbAAAtaQAAAAAAAAAAcyEZJgAALWkAAAAAAAAAACm+Dn4AAC1pAAAAAAAAAAB04vMyAAAtaQAAAAAAAAAANk4tVQAALWkAAAAAAAAAANRcdnwAAC1pAAAAAAAAAAB9J5EIAAAtaQAAAAAAAAAApeOhygAALWkAAAAAAAAAAK4kOPYAAC1pAAAAAAAAAABnC1mkAAAtaQAAAAAAAAAANqo7KwAALWkAAAAAAAAAADRO0w0AAC1pAAAAAAAAAAABtNQAAAAtaQAAAAAAAAAAcm+nvgAALWkAAAAAAAAAALS/SCYAAC1pAAAAAAAAAAA2SvPwAAAtaQAAAAAAAAAANpKzmAAALWkAAAAAAAAAAJ5VSogAAC1pAAAAAAAAAACyotgHAAAtaQAAAAAAAAAANkoQ2wAALWkAAAAAAAAAADZOAFMAAC1pAAAAAAAAAAA2qm9GAAAtaQAAAAAAAAAANpvTAgAALWkAAAAAAAAAAG/GQiEAAC1pAAAAAAAAAAAju7lmAAAtaQAAAAAAAAAANk7rHwAALWkAAAAAAAAAABfyLQ0AAC1pAAAAAAAAAAA2TjaRAAAtaQAAAAAAAAAANk5J7gAALWkAAAAAAAAAAHRm84QAAC1pAAAAAAAAAAAr/7KvAAAtaQAAAAAAAAAAufEGsgAALWkAAAAAAAAAADZOzt4AAC1pAAAAADKjiRSHBdyaVK1C+7UoMAGGyLJ5D1CjOi7gsns2GEFBgAABaAAAAAAAAAAAAAAAAgAAAAsAAAAAAsUlnka7dHFfp69mUW6kEQ18IpsXLwcYk6yphpesUysAAAAAAULT7wAAAAN1tE4FkHboorc8QsJU7+LkIN2zbNK9MrkY49OpVcEzDwAAAAIAAAAw/0TiDQ==",
             base64::STANDARD
-        ).expect("should be able to decode to bytes");;
+        ).expect("should be able to decode to bytes");
 
         let len = get_xdr_message_length(&xdr_has_next_msg);
         let (nxt_msg, _) = get_message(&xdr_has_next_msg, len);

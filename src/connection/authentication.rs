@@ -298,7 +298,6 @@ mod test {
         let mut auth = mock_connection_auth();
         let time_now = time_now();
 
-
         let auth_cert = create_auth_cert(
             auth.network_id(),
             auth.keypair(),
@@ -364,7 +363,9 @@ mod test {
         .expect("should be able to decode to bytes");
 
         let remote_pub_key = Curve25519Public {
-            key: bytes.try_into().expect("should be able to convert to array of 32"),
+            key: bytes
+                .try_into()
+                .expect("should be able to convert to array of 32"),
         };
 
         assert!(auth.shared_key(&remote_pub_key, we_called_remote).is_none());
