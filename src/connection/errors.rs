@@ -1,9 +1,10 @@
 #![allow(dead_code)] //todo: remove after being tested and implemented
 
 use crate::xdr_converter::Error as XDRError;
+use substrate_stellar_sdk::StellarSdkError;
 use tokio::sync;
 
-#[derive(Debug, Eq, PartialEq, err_derive::Error)]
+#[derive(Debug, PartialEq, err_derive::Error)]
 pub enum Error {
     #[error(display = "Authentication Certification: Expired")]
     AuthCertExpired,
@@ -50,6 +51,9 @@ pub enum Error {
     #[error(display = "{:?}", _0)]
     XDRConversionError(XDRError),
 
+    #[error(display = "{:?}", _0)]
+    StellarSdkError(StellarSdkError),
+
     #[error(display = "The sender channel is not initialized.")]
     ChannelNotSet,
 }
@@ -66,8 +70,8 @@ impl<T> From<sync::mpsc::error::SendError<T>> for Error {
     }
 }
 
-impl<T> From<sync::broadcast::error::SendError<T>> for Error {
-    fn from(e: sync::broadcast::error::SendError<T>) -> Self {
-        Error::SendFailed(e.to_string())
+impl From<StellarSdkError> for Error {
+    fn from(e: StellarSdkError) -> Self {
+        Error::StellarSdkError(e)
     }
 }

@@ -112,15 +112,16 @@ impl ConnectionAuth {
     /// # Arguments
     /// * `valid_at` - the validity start date in milliseconds.
     pub fn auth_cert(&self, valid_at: u64) -> Result<&AuthCert, Error> {
-        match self.auth_cert.as_ref() {
-            None => Err(Error::AuthCertNotFound),
-            Some(auth_cert) => {
+        self.auth_cert
+            .as_ref()
+            .ok_or(Error::AuthCertNotFound)
+            .and_then(|auth_cert| {
                 if self.auth_cert_expiration < (valid_at + AUTH_CERT_EXPIRATION_LIMIT / 2) {
-                    return Err(Error::AuthCertExpired);
+                    Err(Error::AuthCertExpired)
+                } else {
+                    Ok(auth_cert)
                 }
-                Ok(auth_cert)
-            }
-        }
+            })
     }
 
     pub fn set_auth_cert(&mut self, auth_cert: AuthCert) {
@@ -206,7 +207,7 @@ pub fn create_auth_cert(
     keypair: &SecretKey,
     valid_at: u64,
     pub_key_ecdh: Curve25519Public,
-) -> AuthCert {
+) -> Result<AuthCert, Error> {
     let mut network_id_xdr = network_id.to_xdr();
     let expiration = valid_at + AUTH_CERT_EXPIRATION_LIMIT;
 
@@ -222,14 +223,13 @@ pub fn create_auth_cert(
 
     let raw_sig_data = hash.finalize().to_vec();
 
-    let signature: Signature =
-        Signature::new(keypair.create_signature(raw_sig_data).to_vec()).unwrap();
+    let signature: Signature = Signature::new(keypair.create_signature(raw_sig_data).to_vec())?;
 
-    AuthCert {
+    Ok(AuthCert {
         pubkey: pub_key_ecdh,
         expiration,
         sig: signature,
-    }
+    })
 }
 
 pub fn verify_remote_auth_cert(
@@ -253,9 +253,19 @@ pub fn verify_remote_auth_cert(
     hash.update(raw_data);
 
     let raw_data = hash.finalize().to_vec();
+    let auth_cert_sig = auth_cert.sig.get_vec().clone();
+    let sig_len = auth_cert_sig.len();
 
-    let raw_sig: [u8; 64] = auth_cert.sig.get_vec().clone().try_into().unwrap();
-    remote_pub_key.verify_signature(raw_data, &raw_sig)
+    match auth_cert_sig.try_into() {
+        Ok(raw_sig) => remote_pub_key.verify_signature(raw_data, &raw_sig),
+        Err(_) => {
+            log::warn!(
+                "failed to convert auth cert signature of size {} to fixed array of 64.",
+                sig_len
+            );
+            return false;
+        }
+    }
 }
 
 #[cfg(test)]
@@ -269,7 +279,7 @@ mod test {
     use crate::connection::hmac::{create_sha256_hmac, verify_hmac};
     use crate::create_auth_cert;
     use crate::errors::Error;
-    use crate::helper::generate_random_nonce;
+    use crate::helper::{generate_random_nonce, time_now};
     use substrate_stellar_sdk::network::Network;
     use substrate_stellar_sdk::types::{Curve25519Public, HmacSha256Mac};
     use substrate_stellar_sdk::{SecretKey, XdrCodec};
@@ -286,18 +296,16 @@ mod test {
     #[test]
     fn create_valid_auth_cert() {
         let mut auth = mock_connection_auth();
-        let time_now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_millis();
-        let time_now = u64::try_from(time_now).unwrap();
+        let time_now = time_now();
+
 
         let auth_cert = create_auth_cert(
             auth.network_id(),
             auth.keypair(),
             time_now,
             auth.pub_key_ecdh.clone(),
-        );
+        )
+        .expect("should successfully create auth cert");
 
         auth.set_auth_cert(auth_cert.clone());
 
@@ -315,10 +323,7 @@ mod test {
     fn expired_auth_cert() {
         let mut auth = mock_connection_auth();
 
-        let time_now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+        let time_now = time_now();
 
         assert_eq!(auth.auth_cert(time_now), Err(Error::AuthCertNotFound));
 
@@ -327,7 +332,8 @@ mod test {
             auth.keypair(),
             time_now,
             auth.pub_key_ecdh.clone(),
-        );
+        )
+        .expect("should successfully create an auth cert");
 
         auth.set_auth_cert(new_auth_cert.clone());
 
@@ -355,9 +361,10 @@ mod test {
             "SaINZpCTl6KO8xMLvDkE2vE3knQz0Ma1RmJySOFqsWk=",
             base64::STANDARD,
         )
-        .unwrap();
+        .expect("should be able to decode to bytes");
+
         let remote_pub_key = Curve25519Public {
-            key: bytes.try_into().unwrap(),
+            key: bytes.try_into().expect("should be able to convert to array of 32"),
         };
 
         assert!(auth.shared_key(&remote_pub_key, we_called_remote).is_none());
@@ -382,7 +389,7 @@ mod test {
             let mut message = base64::decode_config(
                 "AAAAAAAAAAAAAAE3AAAACwAAAACslTOENMyaVlaiRvFAjiP6s8nFVIHDgWGbncnw+ziO5gAAAAACKbcUAAAAAzQaCq4p6tLHpdfwGhnlyX9dMUP70r4Dm98Td6YvKnhoAAAAAQAAAJijLxoAW1ZSaVphczIXU0XT7i46Jla6OZxkm9mEUfan3gAAAABg6Ee9AAAAAAAAAAEAAAAA+wsSteGzmcH88GN69FRjGLfxMzFH8tsJTaK+8ERePJMAAABAOiGtC3MiMa3LVn8f6SwUpKOmSMAJWQt2vewgt8T9WkRUPt2UdYac7vzcisXnmiusHldZcjVMF3vS03QhzaxdDQAAAAEAAACYoy8aAFtWUmlaYXMyF1NF0+4uOiZWujmcZJvZhFH2p94AAAAAYOhHvQAAAAAAAAABAAAAAPsLErXhs5nB/PBjevRUYxi38TMxR/LbCU2ivvBEXjyTAAAAQDohrQtzIjGty1Z/H+ksFKSjpkjACVkLdr3sILfE/VpEVD7dlHWGnO783IrF55orrB5XWXI1TBd70tN0Ic2sXQ0AAABA0ZiyH9AGgPR/d3h+94s6+iU5zhZbKM/5DIOYeKgxwEOotUveGfHLN5IQk7VlTW2arDkk+ekzjRQfBoexrkJrBMsQ30YpI1R/uY9npg0Fpt1ScyZ+yhABs6x1sEGminNh",
                 base64::STANDARD,
-            ).unwrap();
+            ) .expect("should be able to decode to bytes");
 
             let mut buf = vec![];
             buf.append(&mut peer_sequence);

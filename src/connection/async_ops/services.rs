@@ -1,10 +1,11 @@
+use substrate_stellar_sdk::SecretKey;
 use crate::async_ops::connector::{ConnectionState, Connector, ConnectorActions};
 
 use crate::async_ops::user_controls::UserControls;
 use crate::async_ops::Xdr;
 use crate::errors::Error;
 use crate::helper::time_now;
-use crate::{get_xdr_message_length, ReadState};
+use crate::{get_xdr_message_length, NodeInfo, ReadState};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{tcp, TcpStream};
 use tokio::sync::mpsc;
@@ -76,7 +77,7 @@ async fn read_unfinished_message(
 
     let actual_msg_len = read_stream(r_stream, &mut cont_buf).await?;
 
-    // this partial message, completes the previous message.
+    // this partial message completes the previous message.
     if actual_msg_len == *lack_bytes_from_prev {
         log::trace!(
             "proc_id: {} received continuation from the previous message.",
@@ -253,7 +254,11 @@ pub async fn connection_handler(
 
 /// Triggers connection to the Stellar Node.
 /// Returns the UserControls for the user to send and receive Stellar messages.
-pub async fn connect(mut conn: Connector, addr: &str) -> Result<UserControls, Error> {
+pub async fn connect( local_node: NodeInfo,
+                      keypair: SecretKey,
+                      auth_cert_expiration: u64,
+                      remote_called_us: bool,
+                      addr: &str) -> Result<UserControls, Error> {
     // split the stream for easy handling of read and write
     let (rd, wr) = create_stream(addr).await?;
 
@@ -264,9 +269,8 @@ pub async fn connect(mut conn: Connector, addr: &str) -> Result<UserControls, Er
     // this is a chanel to communicate with the user/caller.
     let (message_writer, message_receiver) = mpsc::channel::<ConnectionState>(1024);
 
-    // set the channel into the config.
-    conn.set_sender_to_self(actions_sender.clone());
-    conn.set_message_writer(message_writer);
+    let conn = Connector::new(local_node, keypair, auth_cert_expiration, remote_called_us,actions_sender.clone(),message_writer);
+
 
     // start the receiving_service
     tokio::spawn(receiving_service(rd, actions_sender.clone()));

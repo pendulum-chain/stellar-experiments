@@ -87,22 +87,28 @@ type Buffer = [u8; 32];
 pub type HmacSha256 = Hmac<Sha256>;
 
 pub fn create_sha256_hmac(data_buffer: &[u8], mac_key_buffer: &Buffer) -> Option<HmacSha256Mac> {
-    let res = HmacSha256::new_from_slice(mac_key_buffer)
-        .map(|mut hmac| {
-            hmac.update(data_buffer);
+    if let Ok(mut hmac) = HmacSha256::new_from_slice(mac_key_buffer) {
+        hmac.update(data_buffer);
 
-            let hmac = hmac.finalize().into_bytes().to_vec();
-
-            HmacSha256Mac {
-                mac: hmac.try_into().unwrap(),
+        let hmac_vec = hmac.finalize().into_bytes().to_vec();
+        let hmac_vec_len = hmac_vec.len();
+        return match hmac_vec.try_into() {
+            Ok(mac) => Some(HmacSha256Mac { mac }),
+            Err(_) => {
+                log::warn!(
+                    "failed to convert hmac of size {} into an array of 32.",
+                    hmac_vec_len
+                );
+                None
             }
-        })
-        .ok();
-
-    if res.is_none() {
-        log::warn!("InvalidLength when converting the bufffer to sha256 hmac.");
+        };
     }
-    res
+
+    log::warn!(
+        "Invalid length of mac key buffer size {}",
+        mac_key_buffer.len()
+    );
+    None
 }
 
 pub fn verify_hmac(data_buffer: &[u8], mac_key_buffer: &Buffer, mac: &[u8]) -> Result<(), Error> {
@@ -110,6 +116,5 @@ pub fn verify_hmac(data_buffer: &[u8], mac_key_buffer: &Buffer, mac: &[u8]) -> R
         HmacSha256::new_from_slice(mac_key_buffer).map_err(|_| Error::HmacInvalidLength)?;
 
     hmac.update(data_buffer);
-
     hmac.verify_slice(mac).map_err(|e| Error::HmacError(e))
 }

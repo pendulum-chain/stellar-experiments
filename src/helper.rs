@@ -24,5 +24,8 @@ pub fn time_now() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_millis();
-    u64::try_from(valid_at).unwrap()
+    u64::try_from(valid_at).unwrap_or_else(|_| {
+        log::warn!("could not convert time at u128 to u64.");
+        u64::MAX
+    })
 }

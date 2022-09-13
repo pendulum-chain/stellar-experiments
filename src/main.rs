@@ -18,24 +18,21 @@ use crate::async_ops::{connect, ConnectionState, UserControls};
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
 
-    let cfg = {
-        let secret =
-            SecretKey::from_encoding("SBLI7RKEJAEFGLZUBSCOFJHQBPFYIIPLBCKN7WVCWT4NEG2UJEW33N73")
-                .unwrap();
+    let secret =
+        SecretKey::from_encoding("SBLI7RKEJAEFGLZUBSCOFJHQBPFYIIPLBCKN7WVCWT4NEG2UJEW33N73")
+            .unwrap();
 
-        let node_info = NodeInfo::new(
-            19,
-            21,
-            19,
-            "v19.1.0".to_string(),
-            &Network::new(b"Public Global Stellar Network ; September 2015"),
-        );
+    let node_info = NodeInfo::new(
+        19,
+        21,
+        19,
+        "v19.1.0".to_string(),
+        &Network::new(b"Public Global Stellar Network ; September 2015"),
+    );
 
-        async_ops::Connector::new(node_info, secret, 0, false)
-    };
     let addr = "135.181.16.110:11625";
 
-    let mut user_controls: UserControls = connect(cfg, addr).await?;
+    let mut user_controls: UserControls = connect(node_info,secret,0,false, addr).await?;
 
     loop {
         if let Some(conn_state) = user_controls.recv().await {

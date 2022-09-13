@@ -72,11 +72,7 @@ impl Connector {
                 log::trace!("what to do with send more");
             }
             other => {
-                let sender = self
-                    .stellar_message_writer
-                    .as_ref()
-                    .ok_or(Error::ChannelNotSet)?;
-                sender
+                self.stellar_message_writer
                     .send(ConnectionState::Data(message_id, other))
                     .await?;
                 self.check_to_send_more(msg_type).await?;
@@ -91,14 +87,9 @@ impl Connector {
         }
 
         self.handshake_state = HandshakeState::Completed;
-        let sender = self
-            .stellar_message_writer
-            .as_ref()
-            .ok_or(Error::ChannelNotSet)?;
-
         log::info!("Handshake completed");
         if let Some(remote) = self.remote.as_ref() {
-            sender
+            self.stellar_message_writer
                 .send(ConnectionState::Connect {
                     pub_key: remote.pub_key().clone(),
                     node_info: remote.node().clone(),
@@ -137,5 +128,12 @@ impl Connector {
         self.remote = Some(remote_info);
 
         Ok(())
+    }
+
+    fn increment_remote_sequence(&mut self) -> Result<(), Error> {
+        self.remote
+            .as_mut()
+            .map(|remote| remote.increment_sequence())
+            .ok_or(Error::NoRemoteInfo)
     }
 }

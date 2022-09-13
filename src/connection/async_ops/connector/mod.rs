@@ -50,10 +50,10 @@ pub struct Connector {
     flow_controller: FlowController,
 
     /// a channel to writing xdr messages to stream.
-    stream_writer: Option<mpsc::Sender<ConnectorActions>>,
+    stream_writer: mpsc::Sender<ConnectorActions>,
 
     /// a channel to communicate back to the caller
-    stellar_message_writer: Option<mpsc::Sender<ConnectionState>>,
+    stellar_message_writer: mpsc::Sender<ConnectionState>,
 }
 
 impl Connector {
@@ -159,7 +159,7 @@ impl Connector {
                     self.connection_auth.keypair(),
                     valid_at,
                     self.connection_auth.pub_key_ecdh().clone(),
-                );
+                )?;
 
                 self.connection_auth.set_auth_cert(new_auth_cert.clone());
 
@@ -175,16 +175,9 @@ impl Connector {
             auth_cert,
             self.local.port(),
             &self.local.node(),
-        );
+        )?;
 
         self.create_xdr_message(msg)
-    }
-
-    fn increment_remote_sequence(&mut self) -> Result<(), Error> {
-        self.remote
-            .as_mut()
-            .map(|remote| remote.increment_sequence())
-            .ok_or(Error::NoRemoteInfo)
     }
 
     pub fn new(
@@ -192,7 +185,8 @@ impl Connector {
         keypair: SecretKey,
         auth_cert_expiration: u64,
         remote_called_us: bool,
-        // stream_writer: broadcast::Sender<Xdr>
+        send_to_self: mpsc::Sender<ConnectorActions>,
+        send_to_user: mpsc::Sender<ConnectionState>
     ) -> Self {
         let connection_auth =
             ConnectionAuth::new(&local_node.network_id, keypair, auth_cert_expiration);
@@ -207,16 +201,9 @@ impl Connector {
             receive_scp_messages: true,
             handshake_state: HandshakeState::Connecting,
             flow_controller: FlowController::default(),
-            stream_writer: None,
-            stellar_message_writer: None,
+            stream_writer: send_to_self,
+            stellar_message_writer: send_to_user,
         }
     }
 
-    pub fn set_sender_to_self(&mut self, sender: mpsc::Sender<ConnectorActions>) {
-        self.stream_writer = Some(sender)
-    }
-
-    pub fn set_message_writer(&mut self, sender: mpsc::Sender<ConnectionState>) {
-        self.stellar_message_writer = Some(sender);
-    }
 }
