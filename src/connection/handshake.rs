@@ -22,7 +22,7 @@ pub enum HandshakeState {
 }
 
 pub fn create_auth_message() -> StellarMessage {
-    let auth = Auth { unused: 1 };
+    let auth = Auth { flags: 1 };
 
     StellarMessage::Auth(auth)
 }

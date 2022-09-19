@@ -29,3 +29,11 @@ pub fn time_now() -> u64 {
         u64::MAX
     })
 }
+
+pub fn hash(data:&[u8]) -> [u8;32] {
+    let mut hasher = Sha256::new();
+    hasher.update(data);
+    hasher.finalize().as_slice().try_into().unwrap()
+}
+
+
