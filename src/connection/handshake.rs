@@ -1,22 +1,13 @@
 use substrate_stellar_sdk::compound_types::LimitedString;
 
-use crate::errors::Error;
 use crate::node::NodeInfo;
+use crate::Error;
 use substrate_stellar_sdk::types::{Auth, AuthCert, Hello, StellarMessage, Uint256};
 use substrate_stellar_sdk::PublicKey;
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum ReadState {
-    ReadyForLength,
-    ReadNotStarted,
-    ReadyForMessage,
-    Blocked,
-}
-
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum HandshakeState {
     Connecting,
-    Connected,
     GotHello,
     Completed,
 }

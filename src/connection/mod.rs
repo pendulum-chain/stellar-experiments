@@ -1,15 +1,41 @@
-pub mod async_ops;
-mod authentication;
-pub mod errors;
+pub(crate) mod authentication;
+mod errors;
 mod flow_controller;
 mod handshake;
 mod hmac;
 
-pub use authentication::*;
-pub use handshake::*;
-use substrate_stellar_sdk::SecretKey;
+mod connector;
+mod services;
+mod user_controls;
 
-pub struct Config {
+pub use errors::Error;
+pub use services::*;
+pub use user_controls::*;
+
+type Xdr = (u32, Vec<u8>);
+
+use crate::node::NodeInfo;
+pub(crate) use handshake::*;
+use substrate_stellar_sdk::types::{MessageType, StellarMessage};
+use substrate_stellar_sdk::{PublicKey, SecretKey};
+
+#[derive(Debug)]
+pub enum ConnectionState {
+    Connect {
+        pub_key: PublicKey,
+        node_info: NodeInfo,
+    },
+    Data {
+        p_id: u32,
+        msg_type: MessageType,
+        msg: StellarMessage,
+    },
+
+    Error(String),
+    Timeout,
+}
+
+pub struct ConnConfig {
     address: String,
     port: u32,
     secret_key: SecretKey,
@@ -19,7 +45,7 @@ pub struct Config {
     pub remote_called_us: bool,
 }
 
-impl Config {
+impl ConnConfig {
     pub fn new(
         addr: &str,
         port: u32,
@@ -28,8 +54,8 @@ impl Config {
         recv_tx_msgs: bool,
         recv_scp_messages: bool,
         remote_called_us: bool,
-    ) -> Config {
-        Config {
+    ) -> ConnConfig {
+        ConnConfig {
             address: addr.to_owned(),
             port,
             secret_key,

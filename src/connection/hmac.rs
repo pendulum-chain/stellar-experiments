@@ -1,4 +1,4 @@
-use crate::errors::Error;
+use crate::Error;
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
 use substrate_stellar_sdk::types::{HmacSha256Mac, Uint256};

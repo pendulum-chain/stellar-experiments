@@ -1,9 +1,9 @@
 #![allow(dead_code)] //todo: remove after being tested and implemented
 
-use std::fmt::Debug;
-use substrate_stellar_sdk::types::{
+use crate::sdk::types::{
     AuthenticatedMessage, AuthenticatedMessageV0, HmacSha256Mac, MessageType, StellarMessage,
 };
+use std::fmt::Debug;
 use substrate_stellar_sdk::XdrCodec;
 
 #[derive(Debug, Eq, PartialEq, err_derive::Error)]
@@ -20,7 +20,7 @@ pub enum Error {
 
 /// The 1st 4 bytes determines the byte length of the next stellar message.
 /// Returns 0 if the array of u8 is less than 4 bytes, or exceeds the max of u32.
-pub fn get_xdr_message_length(data: &[u8]) -> usize {
+pub(crate) fn get_xdr_message_length(data: &[u8]) -> usize {
     if data.len() < 4 {
         return 0;
     }
@@ -33,7 +33,7 @@ pub fn get_xdr_message_length(data: &[u8]) -> usize {
 }
 
 /// Returns xdr of the authenticated message
-pub fn from_authenticated_message(message: &AuthenticatedMessage) -> Result<Vec<u8>, Error> {
+pub(crate) fn from_authenticated_message(message: &AuthenticatedMessage) -> Result<Vec<u8>, Error> {
     message_to_bytes(message)
 }
 
@@ -58,15 +58,18 @@ macro_rules! _stellar_message {
 /// Basic usage:
 ///
 /// ```
+/// use substrate_stellar_sdk::types::Auth;
+/// use stellar_oracle::parse_stellar_type;
 /// let auth_xdr =  [0, 0, 0, 1];
 /// let result = parse_stellar_type!(auth_xdr,Auth);
-/// assert_eq!(result, Ok(Auth { unused: 1 }))
+/// assert_eq!(result, Ok(Auth { flags: 1 }))
 /// ```
+#[macro_export]
 macro_rules! parse_stellar_type {
     ($ref:ident, $struct_str:ident) => {{
-        use crate::xdr_converter::Error;
-        use substrate_stellar_sdk::types::$struct_str;
-        use substrate_stellar_sdk::XdrCodec;
+        use $crate::sdk::types::$struct_str;
+        use $crate::sdk::XdrCodec;
+        use $crate::xdr_converter::Error;
 
         let ret: Result<$struct_str, Error> = $struct_str::from_xdr($ref).map_err(|e| {
             log::error!("decode error: {:?}", e);
@@ -78,7 +81,7 @@ macro_rules! parse_stellar_type {
 
 /// Parses the xdr message into `AuthenticatedMessageV0`.
 /// When successful, returns a tuple of the message and the `MessageType`.
-pub fn parse_authenticated_message(
+pub(crate) fn parse_authenticated_message(
     xdr_message: &[u8],
 ) -> Result<(AuthenticatedMessageV0, MessageType), Error> {
     let xdr_msg_len = xdr_message.len();

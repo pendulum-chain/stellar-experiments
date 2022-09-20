@@ -1,8 +1,8 @@
 use rand::Rng;
 use sha2::{Digest, Sha256};
 use std::time::{SystemTime, UNIX_EPOCH};
-use substrate_stellar_sdk::types::Uint256;
-use substrate_stellar_sdk::SecretKey;
+use substrate_stellar_sdk::types::{TransactionSet, Uint256};
+use substrate_stellar_sdk::{SecretKey, XdrCodec};
 
 /// Returns a new BigNumber with a pseudo-random value equal to or greater than 0 and less than 1.
 pub fn generate_random_nonce() -> Uint256 {
@@ -30,10 +30,14 @@ pub fn time_now() -> u64 {
     })
 }
 
-pub fn hash(data:&[u8]) -> [u8;32] {
+//todo: this has to be moved somewhere.
+pub fn compute_non_generic_tx_set_content_hash(tx_set: &TransactionSet) -> [u8; 32] {
     let mut hasher = Sha256::new();
-    hasher.update(data);
+    hasher.update(tx_set.previous_ledger_hash);
+
+    tx_set.txes.get_vec().iter().for_each(|envlp| {
+        hasher.update(envlp.to_xdr());
+    });
+
     hasher.finalize().as_slice().try_into().unwrap()
 }
-
-

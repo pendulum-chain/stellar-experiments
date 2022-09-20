@@ -1,4 +1,4 @@
-use crate::BinarySha256Hash;
+use crate::authentication::BinarySha256Hash;
 use substrate_stellar_sdk::network::Network;
 
 mod local;

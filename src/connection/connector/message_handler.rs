@@ -1,11 +1,12 @@
-use crate::async_ops::{Connector, Xdr};
+use crate::authentication::verify_remote_auth_cert;
+use crate::connection::connector::{ConnectionState, Connector};
 use crate::connection::hmac::HMacKeys;
-use crate::errors::Error;
+use crate::connection::Xdr;
 use crate::helper::time_now;
 use crate::node::RemoteInfo;
-use crate::{
-    parse_authenticated_message, verify_remote_auth_cert, ConnectionState, HandshakeState,
-};
+use crate::xdr_converter::parse_authenticated_message;
+use crate::Error;
+use crate::HandshakeState;
 use substrate_stellar_sdk::types::{Hello, MessageType, StellarMessage};
 use substrate_stellar_sdk::XdrCodec;
 
@@ -34,6 +35,7 @@ impl Connector {
                     self.increment_remote_sequence()?;
                     log::trace!("proc_id: {}, auth message verified", proc_id);
                 }
+
                 self.process_stellar_message(proc_id, auth_msg.message, msg_type)
                     .await?;
             }
@@ -44,7 +46,7 @@ impl Connector {
     /// Handles what to do next with the Stellar message. Mostly it will be sent back to the user
     async fn process_stellar_message(
         &mut self,
-        message_id: u32,
+        p_id: u32,
         msg: StellarMessage,
         msg_type: MessageType,
     ) -> Result<(), Error> {
@@ -73,7 +75,11 @@ impl Connector {
             }
             other => {
                 self.stellar_message_writer
-                    .send(ConnectionState::Data(message_id, other))
+                    .send(ConnectionState::Data {
+                        p_id,
+                        msg_type,
+                        msg: other,
+                    })
                     .await?;
                 self.check_to_send_more(msg_type).await?;
             }

@@ -1,7 +1,7 @@
 #![allow(dead_code)] //todo: remove after being tested and implemented
 
 use crate::connection::hmac::create_sha256_hmac;
-use crate::errors::Error;
+use crate::Error;
 use rand::Rng;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -202,7 +202,7 @@ pub fn create_receiving_mac_key(
     create_sha256_hmac(&buf, &shared_key.mac).unwrap_or(HmacSha256Mac { mac: [0; 32] })
 }
 
-pub fn create_auth_cert(
+pub(crate) fn create_auth_cert(
     network_id: &BinarySha256Hash,
     keypair: &SecretKey,
     valid_at: u64,
@@ -271,15 +271,15 @@ pub fn verify_remote_auth_cert(
 #[cfg(test)]
 mod test {
     use crate::connection::authentication::{
-        create_receiving_mac_key, create_sending_mac_key, gen_shared_key, verify_remote_auth_cert,
-        ConnectionAuth, AUTH_CERT_EXPIRATION_LIMIT,
+        create_auth_cert, create_receiving_mac_key, create_sending_mac_key, gen_shared_key,
+        verify_remote_auth_cert, ConnectionAuth, AUTH_CERT_EXPIRATION_LIMIT,
     };
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use crate::connection::hmac::{create_sha256_hmac, verify_hmac};
-    use crate::create_auth_cert;
-    use crate::errors::Error;
     use crate::helper::{generate_random_nonce, time_now};
+    use crate::Error;
+    use crate::{create_auth_cert, Error};
     use substrate_stellar_sdk::network::Network;
     use substrate_stellar_sdk::types::{Curve25519Public, HmacSha256Mac};
     use substrate_stellar_sdk::{SecretKey, XdrCodec};

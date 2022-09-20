@@ -1,20 +1,17 @@
 mod message_handler;
 mod message_sender;
 
-use crate::async_ops::Xdr;
+use crate::authentication::{create_auth_cert, gen_shared_key, ConnectionAuth};
 use crate::connection::flow_controller::FlowController;
-use crate::connection::handshake;
 use crate::connection::hmac::{create_sha256_hmac, verify_hmac, HMacKeys};
-use crate::errors::Error;
-use crate::node::{LocalInfo, RemoteInfo};
-use crate::{
-    create_auth_cert, gen_shared_key, xdr_converter, Config, ConnectionAuth, HandshakeState,
-    NodeInfo,
-};
+use crate::connection::{handshake, Xdr};
+use crate::node::{LocalInfo, NodeInfo, RemoteInfo};
+use crate::Error;
+use crate::{xdr_converter, ConnConfig, ConnectionState, HandshakeState};
 use substrate_stellar_sdk::types::{
     AuthenticatedMessage, AuthenticatedMessageV0, Curve25519Public, HmacSha256Mac, StellarMessage,
 };
-use substrate_stellar_sdk::{PublicKey, XdrCodec};
+use substrate_stellar_sdk::XdrCodec;
 use tokio::sync::mpsc;
 
 #[derive(Debug)]
@@ -22,17 +19,6 @@ pub enum ConnectorActions {
     SendHello,
     SendMessage(StellarMessage),
     HandleMessage(Xdr),
-}
-
-#[derive(Debug)]
-pub enum ConnectionState {
-    Connect {
-        pub_key: PublicKey,
-        node_info: NodeInfo,
-    },
-    Data(u32, StellarMessage),
-    Error(String),
-    Timeout,
 }
 
 pub struct Connector {
@@ -79,7 +65,7 @@ impl Connector {
         AuthenticatedMessage::V0(auth_message_v0)
     }
 
-    pub(crate) fn create_xdr_message(&mut self, msg: StellarMessage) -> Result<Vec<u8>, Error> {
+    pub fn create_xdr_message(&mut self, msg: StellarMessage) -> Result<Vec<u8>, Error> {
         let auth_msg = self.authenticate_message(msg);
         xdr_converter::from_authenticated_message(&auth_msg).map_err(Error::from)
     }
@@ -101,6 +87,25 @@ impl Connector {
         let mut buffer = self.local.sequence().to_be_bytes().to_vec();
         buffer.append(&mut message.to_xdr());
         create_sha256_hmac(&buffer, &sending_mac_key).unwrap_or(empty)
+    }
+
+    /// Verifies the AuthenticatedMessage, received from the Stellar Node
+    fn verify_auth(&self, auth_msg: &AuthenticatedMessageV0, body: &[u8]) -> Result<(), Error> {
+        let remote = self.remote.as_ref().ok_or(Error::NoRemoteInfo)?;
+        log::debug!(
+            "remote sequence: {}, auth message sequence: {}",
+            remote.sequence(),
+            auth_msg.sequence
+        );
+        if remote.sequence() != auth_msg.sequence {
+            //must be handled on main thread because workers could mix up order of messages.
+            return Err(Error::InvalidSequenceNumber);
+        }
+
+        let keys = self.hmac_keys.as_ref().ok_or(Error::MissingHmacKeys)?;
+        verify_hmac(body, &keys.receiving().mac, &auth_msg.mac.to_xdr())?;
+
+        Ok(())
     }
 
     fn get_shared_key(&mut self, remote_pub_key_ecdh: &Curve25519Public) -> HmacSha256Mac {
@@ -130,27 +135,8 @@ impl Connector {
         }
     }
 
-    /// Verifies the AuthenticatedMessage, received from the Stellar Node
-    fn verify_auth(&self, auth_msg: &AuthenticatedMessageV0, body: &[u8]) -> Result<(), Error> {
-        let remote = self.remote.as_ref().ok_or(Error::NoRemoteInfo)?;
-        log::debug!(
-            "remote sequence: {}, auth message sequence: {}",
-            remote.sequence(),
-            auth_msg.sequence
-        );
-        if remote.sequence() != auth_msg.sequence {
-            //must be handled on main thread because workers could mix up order of messages.
-            return Err(Error::InvalidSequenceNumber);
-        }
-
-        let keys = self.hmac_keys.as_ref().ok_or(Error::MissingHmacKeys)?;
-        verify_hmac(body, &keys.receiving().mac, &auth_msg.mac.to_xdr())?;
-
-        Ok(())
-    }
-
     /// The hello message is dependent on the auth cert
-    pub(crate) fn create_hello_message(&mut self, valid_at: u64) -> Result<Vec<u8>, Error> {
+    pub fn create_hello_message(&mut self, valid_at: u64) -> Result<Vec<u8>, Error> {
         let auth_cert = match self.connection_auth.auth_cert(valid_at) {
             Ok(auth_cert) => auth_cert.clone(),
             Err(_) => {
@@ -183,7 +169,7 @@ impl Connector {
 
     pub fn new(
         local_node: NodeInfo,
-        cfg: Config,
+        cfg: ConnConfig,
         send_to_self: mpsc::Sender<ConnectorActions>,
         send_to_user: mpsc::Sender<ConnectionState>,
     ) -> Self {

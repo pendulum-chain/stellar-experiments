@@ -1,6 +1,6 @@
-use crate::async_ops::ConnectorActions;
-use crate::errors::Error;
+use crate::connection::connector::ConnectorActions;
 use crate::ConnectionState;
+use crate::Error;
 use substrate_stellar_sdk::types::StellarMessage;
 use tokio::sync::mpsc;
 

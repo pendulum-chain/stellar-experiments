@@ -1,4 +1,4 @@
-use crate::NodeInfo;
+use crate::node::NodeInfo;
 use substrate_stellar_sdk::types::{Curve25519Public, Hello, Uint256};
 use substrate_stellar_sdk::PublicKey;
 

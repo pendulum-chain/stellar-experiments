@@ -1,5 +1,5 @@
 use crate::helper::generate_random_nonce;
-use crate::NodeInfo;
+use crate::node::NodeInfo;
 use substrate_stellar_sdk::types::Uint256;
 
 #[derive(Debug, Clone)]

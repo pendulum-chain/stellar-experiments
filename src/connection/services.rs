@@ -1,22 +1,14 @@
-use crate::async_ops::connector::{ConnectionState, Connector, ConnectorActions};
-
-use crate::async_ops::user_controls::UserControls;
-use crate::async_ops::Xdr;
-use crate::errors::Error;
+use crate::connection::connector::{Connector, ConnectorActions};
 use crate::helper::time_now;
-use crate::{get_xdr_message_length, Config, NodeInfo, ReadState};
+use crate::node::NodeInfo;
+use crate::xdr_converter::get_xdr_message_length;
+use crate::Error;
+use crate::{ConnConfig, ConnectionState, UserControls};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{tcp, TcpStream};
 use tokio::sync::mpsc;
 
-pub enum StreamActions {
-    ChangeReading(bool, ReadState),
-    StartWriting(Xdr),
-}
-
-pub async fn create_stream(
-    address: &str,
-) -> Result<(tcp::OwnedReadHalf, tcp::OwnedWriteHalf), Error> {
+async fn create_stream(address: &str) -> Result<(tcp::OwnedReadHalf, tcp::OwnedWriteHalf), Error> {
     let stream = TcpStream::connect(address)
         .await
         .map_err(|e| Error::ConnectionFailed(e.to_string()))?;
@@ -215,7 +207,7 @@ async fn receiving_service(
 /// * `conn` - the Connector that would send/handle messages to/from Stellar Node
 /// * `receiver` - The receiver for actions that the Connector should do.
 /// * `w_stream` -> the write half of the TcpStream to connect to the Stellar Node
-pub async fn connection_handler(
+async fn connection_handler(
     mut conn: Connector,
     mut receiver: mpsc::Receiver<ConnectorActions>,
     mut w_stream: tcp::OwnedWriteHalf,
@@ -253,7 +245,7 @@ pub async fn connection_handler(
 
 /// Triggers connection to the Stellar Node.
 /// Returns the UserControls for the user to send and receive Stellar messages.
-pub async fn connect(local_node: NodeInfo, cfg: Config) -> Result<UserControls, Error> {
+pub async fn connect(local_node: NodeInfo, cfg: ConnConfig) -> Result<UserControls, Error> {
     // split the stream for easy handling of read and write
     let (rd, wr) = create_stream(&cfg.address()).await?;
 

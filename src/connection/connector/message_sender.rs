@@ -1,9 +1,9 @@
+use crate::connection::connector::{Connector, ConnectorActions};
 use substrate_stellar_sdk::types::{MessageType, SendMore, StellarMessage};
 
-use crate::async_ops::connector::{Connector, ConnectorActions};
 use crate::connection::flow_controller::MAX_FLOOD_MSG_CAP;
 use crate::create_auth_message;
-use crate::errors::Error;
+use crate::Error;
 
 impl Connector {
     /// Sends an xdr version of a wrapped AuthenticatedMessage ( StellarMessage ).
