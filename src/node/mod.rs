@@ -1,4 +1,3 @@
-use crate::authentication::BinarySha256Hash;
 use substrate_stellar_sdk::network::Network;
 
 mod local;
@@ -15,7 +14,7 @@ pub struct NodeInfo {
     pub overlay_version: u32,
     pub overlay_min_version: u32,
     pub version_str: Vec<u8>,
-    pub network_id: BinarySha256Hash,
+    pub network_id: NetworkId,
 }
 
 impl NodeInfo {

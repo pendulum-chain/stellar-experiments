@@ -9,11 +9,11 @@ pub struct FlowController {
 }
 
 impl FlowController {
-    pub(crate) fn enable(&mut self, local_overlay_version: u32, remote_overlay_version: u32) {
+    pub fn enable(&mut self, local_overlay_version: u32, remote_overlay_version: u32) {
         self.enabled = remote_overlay_version >= 20 && local_overlay_version >= 20;
     }
 
-    pub(crate) fn send_more(&mut self, message_type: MessageType) -> bool {
+    pub fn send_more(&mut self, message_type: MessageType) -> bool {
         if !self.enabled {
             return false;
         }

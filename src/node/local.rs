@@ -1,4 +1,4 @@
-use crate::helper::generate_random_nonce;
+use crate::connection::helper::generate_random_nonce;
 use crate::node::NodeInfo;
 use substrate_stellar_sdk::types::Uint256;
 

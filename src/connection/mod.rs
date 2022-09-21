@@ -1,13 +1,16 @@
-pub(crate) mod authentication;
 mod errors;
 mod flow_controller;
-mod handshake;
+pub(crate) mod handshake;
 mod hmac;
 
+mod authentication;
 mod connector;
+pub mod helper;
 mod services;
 mod user_controls;
+pub mod xdr_converter;
 
+pub(crate) use connector::*;
 pub use errors::Error;
 pub use services::*;
 pub use user_controls::*;
@@ -15,16 +18,18 @@ pub use user_controls::*;
 type Xdr = (u32, Vec<u8>);
 
 use crate::node::NodeInfo;
-pub(crate) use handshake::*;
 use substrate_stellar_sdk::types::{MessageType, StellarMessage};
 use substrate_stellar_sdk::{PublicKey, SecretKey};
 
 #[derive(Debug)]
-pub enum ConnectionState {
+/// Represents the messages that the connection creates bases on the Stellar Node
+pub enum StellarNodeMessage {
+    /// Successfully connected to the node
     Connect {
         pub_key: PublicKey,
         node_info: NodeInfo,
     },
+    /// Stellar messages from the node
     Data {
         p_id: u32,
         msg_type: MessageType,
@@ -35,6 +40,7 @@ pub enum ConnectionState {
     Timeout,
 }
 
+/// Config for connecting to Stellar Node
 pub struct ConnConfig {
     address: String,
     port: u32,

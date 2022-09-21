@@ -1,12 +1,11 @@
-use crate::authentication::verify_remote_auth_cert;
-use crate::connection::connector::{ConnectionState, Connector};
+use crate::connection::authentication::verify_remote_auth_cert;
+use crate::connection::helper::time_now;
 use crate::connection::hmac::HMacKeys;
+use crate::connection::xdr_converter::parse_authenticated_message;
+use crate::connection::Connector;
 use crate::connection::Xdr;
-use crate::helper::time_now;
 use crate::node::RemoteInfo;
-use crate::xdr_converter::parse_authenticated_message;
-use crate::Error;
-use crate::HandshakeState;
+use crate::{Error, StellarNodeMessage};
 use substrate_stellar_sdk::types::{Hello, MessageType, StellarMessage};
 use substrate_stellar_sdk::XdrCodec;
 
@@ -19,18 +18,18 @@ impl Connector {
         log::debug!("proc_id: {} processing {:?}", proc_id, msg_type);
 
         match msg_type {
-            MessageType::Transaction if !self.receive_tx_messages => {
+            MessageType::Transaction if !self.receive_tx_messages() => {
                 self.increment_remote_sequence()?;
                 self.check_to_send_more(msg_type).await?;
             }
 
-            MessageType::ScpMessage if !self.receive_scp_messages => {
+            MessageType::ScpMessage if !self.receive_scp_messages() => {
                 self.increment_remote_sequence()?;
             }
 
             _ => {
                 // we only verify the authenticated message when a handshake has been done.
-                if self.handshake_state >= HandshakeState::GotHello {
+                if self.is_handshake_created() {
                     self.verify_auth(&auth_msg, &data[4..(data.len() - 32)])?;
                     self.increment_remote_sequence()?;
                     log::trace!("proc_id: {}, auth message verified", proc_id);
@@ -55,9 +54,9 @@ impl Connector {
                 // update the node info based on the hello message
                 self.process_hello_message(hello)?;
 
-                self.handshake_state = HandshakeState::GotHello;
+                self.got_hello();
 
-                if self.remote_called_us {
+                if self.remote_called_us() {
                     self.send_hello_message().await?;
                 } else {
                     self.send_auth_message().await?;
@@ -74,13 +73,12 @@ impl Connector {
                 log::trace!("what to do with send more");
             }
             other => {
-                self.stellar_message_writer
-                    .send(ConnectionState::Data {
-                        p_id,
-                        msg_type,
-                        msg: other,
-                    })
-                    .await?;
+                self.send_to_user(StellarNodeMessage::Data {
+                    p_id,
+                    msg_type,
+                    msg: other,
+                })
+                .await?;
                 self.check_to_send_more(msg_type).await?;
             }
         }
@@ -88,22 +86,22 @@ impl Connector {
     }
 
     async fn process_auth_message(&mut self) -> Result<(), Error> {
-        if self.remote_called_us {
+        if self.remote_called_us() {
             self.send_auth_message().await?;
         }
 
-        self.handshake_state = HandshakeState::Completed;
-        log::info!("Handshake completed");
-        if let Some(remote) = self.remote.as_ref() {
-            self.stellar_message_writer
-                .send(ConnectionState::Connect {
-                    pub_key: remote.pub_key().clone(),
-                    node_info: remote.node().clone(),
-                })
-                .await?;
+        self.handshake_completed();
 
-            self.flow_controller.enable(
-                self.local.node().overlay_version,
+        log::info!("Handshake completed");
+        if let Some(remote) = self.remote() {
+            self.send_to_user(StellarNodeMessage::Connect {
+                pub_key: remote.pub_key().clone(),
+                node_info: remote.node().clone(),
+            })
+            .await?;
+
+            self.enable_flow_controller(
+                self.local().node().overlay_version,
                 remote.node().overlay_version,
             );
         } else {
@@ -124,22 +122,15 @@ impl Connector {
         let remote_info = RemoteInfo::new(&hello);
         let shared_key = self.get_shared_key(&remote_info.pub_key_ecdh());
 
-        self.hmac_keys = Some(HMacKeys::new(
+        self.set_hmac_keys(HMacKeys::new(
             &shared_key,
-            self.local.nonce(),
+            self.local().nonce(),
             remote_info.nonce(),
-            self.remote_called_us,
+            self.remote_called_us(),
         ));
 
-        self.remote = Some(remote_info);
+        self.set_remote(remote_info);
 
         Ok(())
-    }
-
-    fn increment_remote_sequence(&mut self) -> Result<(), Error> {
-        self.remote
-            .as_mut()
-            .map(|remote| remote.increment_sequence())
-            .ok_or(Error::NoRemoteInfo)
     }
 }

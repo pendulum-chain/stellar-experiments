@@ -37,20 +37,6 @@ pub(crate) fn from_authenticated_message(message: &AuthenticatedMessage) -> Resu
     message_to_bytes(message)
 }
 
-/// To easily convert a message into a StellarMessage
-macro_rules! _stellar_message {
-    ($ref:ident, $struct_str:ident) => {{
-        use crate::xdr_converter::{log_decode_error, Error};
-        use substrate_stellar_sdk::types::{$struct_str, StellarMessage};
-        use substrate_stellar_sdk::XdrCodec;
-
-        let ret: Result<StellarMessage, Error> = $struct_str::from_xdr($ref)
-            .map(|msg| StellarMessage::$struct_str(msg))
-            .map_err(|e| log_decode_error(stringify!($struct_str), e));
-        ret
-    }};
-}
-
 /// To easily convert any bytes to a Stellar type.
 ///
 /// # Examples
@@ -162,12 +148,9 @@ fn get_message(data: &[u8], message_len: usize) -> (Vec<u8>, Vec<u8>) {
 
 #[cfg(test)]
 mod test {
-    use crate::create_auth_message;
-    use crate::xdr_converter::{
+    use crate::connection::xdr_converter::{
         get_message, get_xdr_message_length, is_xdr_complete_message, parse_authenticated_message,
     };
-    use substrate_stellar_sdk::types::Auth;
-    use substrate_stellar_sdk::XdrCodec;
 
     #[test]
     fn get_xdr_message_length_success() {

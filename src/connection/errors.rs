@@ -1,6 +1,6 @@
 #![allow(dead_code)] //todo: remove after being tested and implemented
 
-use crate::xdr_converter::Error as XDRError;
+use crate::connection::xdr_converter::Error as XDRError;
 use substrate_stellar_sdk::StellarSdkError;
 use tokio::sync;
 
@@ -27,9 +27,6 @@ pub enum Error {
     #[error(display = "Read: {}", _0)]
     ReadFailed(String),
 
-    #[error(display = "No Response from Stellar Node")]
-    NoResponse, // No data left in the buffer
-
     #[error(display = "The Remote Node Info wasn't initialized.")]
     NoRemoteInfo,
 
@@ -45,17 +42,11 @@ pub enum Error {
     #[error(display = "Hmac: Invalid Length")]
     HmacInvalidLength,
 
-    #[error(display = "Undefined: {}", _0)]
-    Undefined(String),
-
     #[error(display = "{:?}", _0)]
     XDRConversionError(XDRError),
 
     #[error(display = "{:?}", _0)]
     StellarSdkError(StellarSdkError),
-
-    #[error(display = "The sender channel is not initialized.")]
-    ChannelNotSet,
 }
 
 impl From<XDRError> for Error {

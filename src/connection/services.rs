@@ -1,9 +1,9 @@
 use crate::connection::connector::{Connector, ConnectorActions};
-use crate::helper::time_now;
+use crate::connection::helper::time_now;
+use crate::connection::xdr_converter::get_xdr_message_length;
 use crate::node::NodeInfo;
-use crate::xdr_converter::get_xdr_message_length;
 use crate::Error;
-use crate::{ConnConfig, ConnectionState, UserControls};
+use crate::{ConnConfig, StellarNodeMessage, UserControls};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{tcp, TcpStream};
 use tokio::sync::mpsc;
@@ -254,7 +254,7 @@ pub async fn connect(local_node: NodeInfo, cfg: ConnConfig) -> Result<UserContro
     // this is a channel to communicate with the connection/config (this needs renaming)
     let (actions_sender, actions_receiver) = mpsc::channel::<ConnectorActions>(1024);
     // this is a chanel to communicate with the user/caller.
-    let (message_writer, message_receiver) = mpsc::channel::<ConnectionState>(1024);
+    let (message_writer, message_receiver) = mpsc::channel::<StellarNodeMessage>(1024);
 
     let conn = Connector::new(local_node, cfg, actions_sender.clone(), message_writer);
 
