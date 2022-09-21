@@ -45,7 +45,7 @@ pub(crate) fn from_authenticated_message(message: &AuthenticatedMessage) -> Resu
 ///
 /// ```
 /// use substrate_stellar_sdk::types::Auth;
-/// use stellar_oracle::parse_stellar_type;
+/// use stellar_relay::parse_stellar_type;
 /// let auth_xdr =  [0, 0, 0, 1];
 /// let result = parse_stellar_type!(auth_xdr,Auth);
 /// assert_eq!(result, Ok(Auth { flags: 1 }))
@@ -128,7 +128,7 @@ fn message_to_bytes<T: XdrCodec>(message: &T) -> Result<Vec<u8>, Error> {
     Ok(buffer)
 }
 
-fn log_decode_error<T: Debug>(source: &str, error: T) -> Error {
+pub fn log_decode_error<T: Debug>(source: &str, error: T) -> Error {
     log::error!("decode error: {:?}", error);
     Error::DecodeError(source.to_string())
 }

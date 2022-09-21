@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [lib]
-name = "stellar_overlay"
+name = "stellar_relay"
 path = "src/lib.rs"
 
 [[bin]]
@@ -25,8 +25,10 @@ tweetnacl = "0.4.0"
 hmac = "0.12.1"
 sha2 = "0.10.2"
 
-#substrate-stellar-sdk = {git = "https://github.com/pendulum-chain/substrate-stellar-sdk", branch = "master", default-features = false, features = ['all-types']}
-substrate-stellar-sdk = {path = "../substrate-stellar-sdk", default-features = false, features = ['all-types']}
+serde = { version = "1.0.130", features = ["derive"] }
+serde_json = {version = '1.0.45'}
+
+substrate-stellar-sdk = {git = "https://github.com/pendulum-chain/substrate-stellar-sdk", branch = "master", default-features = false, features = ['all-types']}
 
 tokio = { version = "1.20.1", features = ["full"] }
 err-derive = "0.3.1"

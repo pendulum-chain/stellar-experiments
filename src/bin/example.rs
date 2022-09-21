@@ -1,22 +1,178 @@
-use std::collections::HashMap;
+use sha2::{Digest, Sha256};
+use std::collections::{BTreeMap, HashMap};
+use std::fmt::format;
+use std::fs;
 
-use stellar_oracle::helper::compute_non_generic_tx_set_content_hash;
-use stellar_oracle::node::NodeInfo;
-use stellar_oracle::ConnConfig;
-use stellar_oracle::{connect, parse_stellar_type};
-use stellar_oracle::{StellarNodeMessage, UserControls};
+use serde::{Deserialize, Serialize};
+use stellar_relay::helper::{compute_non_generic_tx_set_content_hash, time_now};
+use stellar_relay::node::NodeInfo;
+use substrate_stellar_sdk::compound_types::UnlimitedVarArray;
+use substrate_stellar_sdk::network::Network;
+use substrate_stellar_sdk::types::OfferEntryFlags::PassiveFlag;
+use substrate_stellar_sdk::types::{
+    LedgerHeader, ScpStatementExternalize, ScpStatementPledges, TransactionSet, Uint256, Uint64,
+};
+use substrate_stellar_sdk::types::{ScpEnvelope, StellarMessage};
+use substrate_stellar_sdk::{
+    Hash, ReadStream, SecretKey, StellarSdkError, TransactionEnvelope, WriteStream, XdrCodec,
+};
+use tokio::fs::File;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-use stellar_oracle::sdk as stellar_sdk;
-use stellar_sdk::network::Network;
-use stellar_sdk::types::StellarMessage;
-use stellar_sdk::types::{LedgerHeader, ScpStatementPledges, TransactionSet, Uint256};
-use stellar_sdk::{SecretKey, TransactionEnvelope, XdrCodec};
-use substrate_stellar_sdk::types::{ScpStatementExternalize, Uint64};
-use substrate_stellar_sdk::Hash;
+use stellar_relay::xdr_converter::log_decode_error;
+use stellar_relay::{
+    connect, parse_stellar_type, ConnConfig, Error, StellarNodeMessage, UserControls,
+};
 
 fn hash_str(hash: &[u8]) -> String {
     base64::encode(hash)
 }
+
+pub const MAX_SLOTS_PER_FILE: Uint64 = 5;
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct ExternalizedMessage {
+    time: Uint64,
+    tx_set: Option<TransactionSet>,
+    envelopes: UnlimitedVarArray<ScpEnvelope>,
+}
+
+#[derive(Serialize, Deserialize, Eq, PartialEq, Clone, PartialOrd, Ord)]
+pub struct XdrExternalizedMessage {
+    time: Uint64,
+    tx_set: String,
+    envelopes: String,
+}
+
+impl ExternalizedMessage {
+    pub fn new() -> Self {
+        ExternalizedMessage {
+            time: time_now(),
+            tx_set: None,
+            envelopes: UnlimitedVarArray::new_empty(),
+        }
+    }
+
+    pub fn add_envelope(&mut self, value: ScpEnvelope) -> Result<(), Error> {
+        self.envelopes.push(value).map_err(Error::from)
+    }
+
+    pub fn insert_tx_set(&mut self, tx_set: TransactionSet) {
+        self.tx_set = Some(tx_set);
+    }
+
+    pub fn encode(&self) -> String {
+        let tx_set = self.tx_set.to_xdr();
+        let envelopes = self.envelopes.to_xdr();
+
+        let xdr_struct = XdrExternalizedMessage {
+            time: self.time,
+            tx_set: base64::encode(&tx_set),
+            envelopes: base64::encode(&envelopes),
+        };
+
+        serde_json::to_string(&xdr_struct).unwrap()
+    }
+
+    pub fn decode(encoded_str: &str) -> Result<Self, Error> {
+        let xdr_struct: XdrExternalizedMessage = serde_json::from_str(encoded_str).unwrap();
+
+        let tx_set = base64::decode_config(xdr_struct.tx_set, base64::STANDARD).unwrap();
+        let tx_set = Option::<TransactionSet>::from_xdr(tx_set)
+            .map_err(|e| log_decode_error("Option TransactionSet", e))?;
+
+        let envelopes = base64::decode_config(xdr_struct.envelopes, base64::STANDARD).unwrap();
+        let envelopes = UnlimitedVarArray::<ScpEnvelope>::from_xdr(envelopes)
+            .map_err(|e| log_decode_error("LimitedVarArray ScpEnvelope", e))?;
+
+        Ok(ExternalizedMessage {
+            time: xdr_struct.time,
+            tx_set,
+            envelopes,
+        })
+    }
+}
+
+async fn write_map_to_file(
+    x: BTreeMap<Uint64, ExternalizedMessage>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let len = x.len();
+
+    // let's write this to file.
+
+    let mut filename: String = "".to_string();
+    let mut file: File;
+
+    let mut m: BTreeMap<Uint64, String> = BTreeMap::new();
+
+    for (idx, (key, value)) in x.into_iter().enumerate() {
+        if idx == 0 {
+            filename.push_str(&format!("{}_{}_externalizedmessages.json", key, time_now()));
+        }
+
+        m.insert(key, value.encode());
+    }
+
+    let res = serde_json::to_vec(&m)?;
+
+    file = File::create(filename).await?;
+
+    file.write_all(&res).await?;
+
+    Ok(())
+}
+
+fn find_file_based_on_slot(wanted_slot: Uint64) -> Option<String> {
+    let paths = fs::read_dir("./").unwrap();
+
+    for path in paths {
+        let file_name = path.unwrap().file_name().into_string().unwrap();
+        let mut splits = file_name.split("_");
+
+        if let Some(slot) = splits.next() {
+            let slot_num = slot.parse::<Uint64>().unwrap();
+            if wanted_slot >= slot_num || wanted_slot <= slot_num + MAX_SLOTS_PER_FILE {
+                // we found it! return this one
+                println!("we found it! return {}", file_name);
+                return Some(file_name);
+            }
+        }
+    }
+    None
+}
+
+async fn read_file(
+    file_name: &str,
+) -> Result<BTreeMap<Uint64, ExternalizedMessage>, Box<dyn std::error::Error>> {
+    let mut m: BTreeMap<Uint64, ExternalizedMessage> = BTreeMap::new();
+
+    let mut file = File::open(file_name).await?;
+
+    let mut bytes: Vec<u8> = vec![];
+    let read_size = file.read_to_end(&mut bytes).await?;
+    println!("read size: {:?}", read_size);
+
+    if read_size > 0 {
+        let inside: BTreeMap<Uint64, String> = serde_json::from_slice(&bytes)?;
+        for (key, value) in inside.into_iter() {
+            let result = ExternalizedMessage::decode(&value)?;
+            m.insert(key, result);
+        }
+    }
+
+    Ok(m)
+}
+
+// #[tokio::main]
+// async fn main() -> Result<(), Box<dyn std::error::Error>> {
+//     if let Some(file) = find_file_based_on_slot(42767459) {
+//         let result = read_file(&file).await?;
+//
+//         println!("the result: {:?}", result);
+//     }
+//
+//     Ok(())
+// }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -39,8 +195,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // final maps
     // todo: if there is no issue/redeem request,then we don't have to store it.
     // for now, just store everything
-    let mut slot_hash_map: HashMap<Uint64, (Vec<ScpStatementExternalize>, Option<TransactionSet>)> =
-        HashMap::new();
+    let mut slot_hash_map: BTreeMap<Uint64, ExternalizedMessage> = BTreeMap::new();
     let mut tx_hash_map: HashMap<Hash, Uint64> = HashMap::new();
 
     loop {
@@ -76,20 +231,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                          hash_str(&x.commit_quorum_set_hash)
                                 );
 
+                                // we're creating a new entry
                                 if let None = tx_set_hash_map.get(&tx_hash) {
                                     tx_set_hash_map.insert(tx_hash, slot);
                                     user.send(StellarMessage::GetTxSet(tx_hash)).await?;
+
+                                    if slot_hash_map.keys().len()
+                                        >= usize::try_from(MAX_SLOTS_PER_FILE).unwrap()
+                                    {
+                                        write_map_to_file(slot_hash_map.clone()).await?;
+                                        slot_hash_map = BTreeMap::new();
+                                    }
                                 }
 
-                                let _ = slot_hash_map
-                                    .entry(slot)
-                                    .and_modify(|value| {
-                                        (*value).0.push(x.clone());
-                                    })
-                                    .or_insert((vec![x.clone()], None));
+                                if let Some(value) = slot_hash_map.get_mut(&slot) {
+                                    value.add_envelope(env.clone())?
+                                } else {
+                                    let mut msg = ExternalizedMessage::new();
+                                    msg.add_envelope(env.clone())?;
+                                    slot_hash_map.insert(slot, msg);
+                                }
                             }
                             _ => {
-                                println!("\n pid: {:?} continue...", p_id);
+                                //println!("\n pid: {:?} continue...", p_id);
                             }
                         },
                         StellarMessage::TxSet(set) => {
@@ -99,10 +263,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                             if let Some(slot) = tx_set_hash_map.get(&tx_set_hash) {
                                 let _ = slot_hash_map.entry(*slot).and_modify(|value| {
-                                    (*value).1 = Some(set.clone());
+                                    (*value).insert_tx_set(set.clone());
                                 });
 
                                 println!("\npid: {:?} This tx set:: {:?} belongs to slot {} with size: {:?}", p_id, hash_str(&tx_set_hash), slot, set.txes.len());
+
+                                set.txes.get_vec().iter().for_each(|tx_env| {
+                                    let tx_hash = tx_env.get_hash(&network);
+                                    tx_hash_map.insert(tx_hash, slot.clone());
+                                })
                             } else {
                                 println!("\npid: {:?} This tx set:: {:?} belongs to no slot with size: {:?}", p_id, hash_str(&tx_set_hash), set.txes.len());
                             }
@@ -114,7 +283,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             // }).collect();
                         }
                         other => {
-                            println!("\n pid: {:?} continue...", p_id);
+                            //println!("\n pid: {:?} continue...", p_id);
                             //log::info!("\npid: {:?}  --> {:?}", p_id, other);
                         }
                     }
