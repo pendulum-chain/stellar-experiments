@@ -47,6 +47,9 @@ pub enum Error {
 
     #[error(display = "{:?}", _0)]
     StellarSdkError(StellarSdkError),
+
+    #[error(display = "{:?}", _0)]
+    Undefined(String)
 }
 
 impl From<XDRError> for Error {
