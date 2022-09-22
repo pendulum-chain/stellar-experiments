@@ -23,7 +23,8 @@ use substrate_stellar_sdk::compound_types::UnlimitedVarArray;
 use substrate_stellar_sdk::types::MessageType::TxSet;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-pub trait FileHandler<T>{
+pub trait FileHandler<T> {
+    const PATH: &'static str;
     fn write_to_file(value:Self) -> Result<String, Error>;
     fn read_file(filename:String) -> T;
     fn find_file_by_slot(slot_param: Slot) -> Result<String,Error>;
@@ -35,6 +36,8 @@ pub const MIN_EXTERNALIZED_MESSAGES: usize = 10;
 pub const MAX_TXS_PER_FILE:Uint64 = 3000;
 
 impl FileHandler<Self> for EnvelopesMap {
+    const PATH: &'static str = "./scp_envelopes";
+
     fn write_to_file(value: Self) -> Result<String, Error> {
         let mut file: File;
 
@@ -55,7 +58,7 @@ impl FileHandler<Self> for EnvelopesMap {
             .map_err(|e| Error::Undefined(e.to_string()))?;
 
         let mut path = PathBuf::new();
-        path.push("./scp_envelopes");
+        path.push(Self::PATH);
         path.push(filename.clone());
 
         file = File::create(path).map_err(|e| Error::Undefined(e.to_string()))?;
@@ -68,7 +71,7 @@ impl FileHandler<Self> for EnvelopesMap {
         let mut m: EnvelopesMap = EnvelopesMap::new();
 
         let mut path = PathBuf::new();
-        path.push("./scp_envelopes");
+        path.push(Self::PATH);
         path.push(filename);
 
         if let Ok(mut file) = File::open(path) {
@@ -93,7 +96,7 @@ impl FileHandler<Self> for EnvelopesMap {
     }
 
     fn find_file_by_slot(slot_param: Slot) -> Result<String,Error> {
-        let paths = fs::read_dir("./scp_envelopes")
+        let paths = fs::read_dir(Self::PATH)
             .map_err(|e| Error::Undefined(e.to_string()))?;
 
         for path in paths {
@@ -119,6 +122,8 @@ impl FileHandler<Self> for EnvelopesMap {
 }
 
 impl FileHandler<Self> for TxSetMap {
+    const PATH: &'static str = "./tx_sets";
+
     fn write_to_file(value: Self) -> Result<String, Error> {
 
         let mut filename: String = "".to_string();
@@ -140,7 +145,7 @@ impl FileHandler<Self> for TxSetMap {
         let res = bincode::serialize(&m).map_err(|e| Error::Undefined(e.to_string()))?;
 
         let mut path = PathBuf::new();
-        path.push("./tx_sets");
+        path.push(Self::PATH);
         path.push(filename.clone());
 
         let mut file = File::create(path).map_err(|e| Error::Undefined(e.to_string()))?;
@@ -153,11 +158,10 @@ impl FileHandler<Self> for TxSetMap {
         let mut m: TxSetMap = TxSetMap::new();
 
         let mut path = PathBuf::new();
-        path.push("./tx_sets");
+        path.push(Self::PATH);
         path.push(filename);
 
         if let Ok(mut file) = File::open(path) {
-
 
             let mut bytes: Vec<u8> = vec![];
             let read_size = file.read_to_end(&mut bytes)
@@ -180,7 +184,7 @@ impl FileHandler<Self> for TxSetMap {
     }
 
     fn find_file_by_slot(slot_param: Slot) -> Result<String,Error> {
-        let paths = fs::read_dir("./tx_sets")
+        let paths = fs::read_dir(Self::PATH)
             .map_err(|e| Error::Undefined(e.to_string()))?;
 
         for path in paths {
@@ -207,13 +211,15 @@ impl FileHandler<Self> for TxSetMap {
 }
 
 impl FileHandler<HashMap<Hash, Slot>> for TxHashMap {
+    const PATH: &'static str = "./tx_hashes";
+
     fn write_to_file(value: Self) -> Result<String, Error> {
 
         let res = bincode::serialize(&value)
             .map_err(|e| Error::Undefined(e.to_string()))?;
 
         let mut path = PathBuf::new();
-        path.push("./tx_hashes");
+        path.push(Self::PATH);
         path.push(value.0.clone());
 
         let mut file = File::create(path).map_err(|e| Error::Undefined(e.to_string()))?;
@@ -226,7 +232,7 @@ impl FileHandler<HashMap<Hash, Slot>> for TxHashMap {
         let mut m: HashMap<Hash,Slot> = HashMap::new();
 
         let mut path = PathBuf::new();
-        path.push("./tx_hashes");
+        path.push(Self::PATH);
         path.push(filename);
 
         if let Ok(mut file) = File::open(path) {
@@ -244,7 +250,7 @@ impl FileHandler<HashMap<Hash, Slot>> for TxHashMap {
     }
 
     fn find_file_by_slot(slot_param: Slot) -> Result<String, Error> {
-        let paths = fs::read_dir("./tx_hashes")
+        let paths = fs::read_dir(Self::PATH)
             .map_err(|e| Error::Undefined(e.to_string()))?;
 
         for path in paths {
@@ -456,7 +462,7 @@ fn get_tx_set_hash(x:&ScpStatementExternalize) -> Result<Hash, stellar_relay::xd
 
 
 
-
+/*
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let slot = 42784130;
@@ -479,10 +485,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
+*/
 
 
 
-/*
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
@@ -529,4 +536,3 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 }
 
-*/
