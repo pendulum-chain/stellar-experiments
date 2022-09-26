@@ -200,24 +200,18 @@ impl FileHandler<Self> for TxSetMap {
 
     fn check_slot_in_splitted_filename(slot_param: Slot, splits: &mut Split<&str>) -> bool {
         fn parse_slot(slot_opt: Option<&str>) -> Option<Slot> {
-            if slot_opt.is_none() {
-                log::warn!("Unconventional file name");
-            };
-
-            slot_opt.and_then(|slot_str| {
-                slot_str
-                    .parse::<Slot>()
-                    .map_err(|e| {
-                        log::warn!("Unconventional file name: {:?}", e);
-                        e
-                    })
-                    .ok()
-            })
+            (slot_opt?)
+                .parse::<Slot>()
+                .map_err(|e| {
+                    log::warn!("Unconventional file name: {:?}", e);
+                    e
+                })
+                .ok()
         }
 
         if let Some(start_slot) = parse_slot(splits.next()) {
             if let Some(end_slot) = parse_slot(splits.next()) {
-                return slot_param >= start_slot && slot_param <= end_slot;
+                return (slot_param >= start_slot) && (slot_param <= end_slot);
             }
         }
 
@@ -243,7 +237,6 @@ impl FileHandler<HashMap<Hash, Slot>> for TxHashMap {
 }
 
 pub struct ScpMessageCollector {
-    start_slot: Slot,
     envelopes_map: EnvelopesMap,
     txset_map: TxSetMap,
     tx_hash_map: HashMap<Hash, Slot>,
@@ -253,7 +246,6 @@ pub struct ScpMessageCollector {
 impl ScpMessageCollector {
     pub fn new(network: Network) -> Self {
         ScpMessageCollector {
-            start_slot: 0,
             envelopes_map: Default::default(),
             txset_map: Default::default(),
             tx_hash_map: Default::default(),
@@ -270,14 +262,6 @@ impl ScpMessageCollector {
         let slot = env.statement.slot_index;
 
         if let ScpStatementPledges::ScpStExternalize(stmt) = &env.statement.pledges {
-            // let's mark our starting slot
-            if self.start_slot == 0 {
-                log::info!("start slot: {}", slot);
-
-                self.start_slot = slot;
-            }
-
-
             let txset_hash = get_tx_set_hash(stmt)?;
 
             if let None = txset_hash_map.get(&txset_hash) {
@@ -311,18 +295,14 @@ impl ScpMessageCollector {
 
     fn check_write_envelopes_to_file(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let mut keys = self.envelopes_map.keys();
+        let keys_len = u64::try_from(keys.len()).unwrap_or(0);
 
         // map is too small; we don't have to write it to file just yet.
-        if keys.len() < usize::try_from(MAX_SLOTS_PER_FILE).unwrap_or(0) {
+        if keys_len < MAX_SLOTS_PER_FILE {
             return Ok(());
         }
 
         log::debug!("The map is getting big. Let's write to file:");
-        // checker if we really have to write to file.
-        let mut to_write = false;
-
-        // indicates the first slot to be written to the NEXT file.
-        let mut next_first_slot = self.start_slot;
 
         // only write a max of MAX_SLOTS_PER_FILE entries.
         let mut counter = 0;
@@ -330,16 +310,22 @@ impl ScpMessageCollector {
         while let Some(key) = keys.next() {
             // save to file if all data for the corresponding slots have been filled.
             if counter == MAX_SLOTS_PER_FILE {
-                next_first_slot = *key;
-                to_write = true;
+                self.write_envelopes_to_file(*key)?;
                 break;
             }
 
             if let Some(value) = self.envelopes_map.get(key) {
                 // check if we have enough externalized messages for the corresponding key
                 if value.len() < MIN_EXTERNALIZED_MESSAGES {
-                    log::info!("slot: {} not enough messages. Let's wait for more.", key);
-                    break;
+                    if keys_len > MAX_SLOTS_PER_FILE + 1 {
+                        println!(
+                            "slot: {} we've waited long enough. let's save to file.",
+                            key
+                        );
+                    } else {
+                        log::info!("slot: {} not enough messages. Let's wait for more.", key);
+                        break;
+                    }
                 }
             } else {
                 // something wrong??? race condition?
@@ -348,10 +334,6 @@ impl ScpMessageCollector {
             }
 
             counter += 1;
-        }
-
-        if to_write {
-            self.write_envelopes_to_file(next_first_slot)?;
         }
 
         Ok(())
@@ -369,8 +351,7 @@ impl ScpMessageCollector {
 
         EnvelopesMap::write_to_file(self.envelopes_map.clone())?;
         self.envelopes_map = new_slot_map;
-        self.start_slot = last_slot;
-        log::info!("start slot is now: {:?}", self.start_slot);
+        log::info!("start slot is now: {:?}", last_slot);
 
         Ok(())
     }
@@ -480,34 +461,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // just a temporary holder
     let mut tx_set_hash_map: HashMap<Hash, Slot> = HashMap::new();
 
-    loop {
-        if let Some(conn_state) = user.recv().await {
-            match conn_state {
-                StellarNodeMessage::Data {
-                    p_id,
-                    msg_type,
-                    msg,
-                } => match msg {
-                    StellarMessage::ScpMessage(env) => {
-                        collector
-                            .handle_envelope(env, &mut tx_set_hash_map, &user)
-                            .await?;
-                    }
-                    StellarMessage::TxSet(set) => {
-                        collector.handle_tx_set(&set, &mut tx_set_hash_map)?;
-                    }
-                    _ => {}
-                },
-
+    while let Some(conn_state) = user.recv().await {
+        match conn_state {
+            StellarNodeMessage::Data {
+                p_id,
+                msg_type,
+                msg,
+            } => match msg {
+                StellarMessage::ScpMessage(env) => {
+                    collector
+                        .handle_envelope(env, &mut tx_set_hash_map, &user)
+                        .await?;
+                }
+                StellarMessage::TxSet(set) => {
+                    collector.handle_tx_set(&set, &mut tx_set_hash_map)?;
+                }
                 _ => {}
-            }
+            },
+
+            _ => {}
         }
     }
+    Ok(())
 }
-
-
 
 #[cfg(test)]
-mod test {
-
-}
+mod test {}
