@@ -1,10 +1,11 @@
 #![allow(dead_code)] //todo: remove after being tested and implemented
 
 use crate::connection::xdr_converter::Error as XDRError;
+use std::array::TryFromSliceError;
 use substrate_stellar_sdk::StellarSdkError;
 use tokio::sync;
 
-#[derive(Debug, PartialEq, err_derive::Error)]
+#[derive(Debug, err_derive::Error)]
 pub enum Error {
     #[error(display = "Authentication Certification: Expired")]
     AuthCertExpired,
@@ -49,6 +50,16 @@ pub enum Error {
     StellarSdkError(StellarSdkError),
 
     #[error(display = "{:?}", _0)]
+    TryFromSliceError(std::array::TryFromSliceError),
+    #[error(display = "{:?}", _0)]
+    SerdeError(bincode::Error),
+    #[error(display = "{:?}", _0)]
+    StdIoError(std::io::Error),
+
+    #[error(display = "{:?}", _0)]
+    Other(String),
+
+    #[error(display = "{:?}", _0)]
     Undefined(String),
 }
 
@@ -67,5 +78,23 @@ impl<T> From<sync::mpsc::error::SendError<T>> for Error {
 impl From<StellarSdkError> for Error {
     fn from(e: StellarSdkError) -> Self {
         Error::StellarSdkError(e)
+    }
+}
+
+impl From<std::io::Error> for Error {
+    fn from(e: std::io::Error) -> Self {
+        Error::StdIoError(e)
+    }
+}
+
+impl From<bincode::Error> for Error {
+    fn from(e: bincode::Error) -> Self {
+        Error::SerdeError(e)
+    }
+}
+
+impl From<std::array::TryFromSliceError> for Error {
+    fn from(e: TryFromSliceError) -> Self {
+        Error::TryFromSliceError(e)
     }
 }
