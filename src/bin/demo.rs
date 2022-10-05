@@ -11,7 +11,7 @@ use std::{
 };
 use substrate_stellar_sdk::{
     types::{PaymentOp, Transaction, TransactionEnvelope, TransactionV0},
-    SecretKey,
+    Asset, SecretKey,
 };
 
 use stellar_relay::{
@@ -176,7 +176,7 @@ pub trait FileHandler<T: Default> {
         let paths = fs::read_dir(Self::PATH)?;
 
         for path in paths {
-            let mut filename_with_ext = path?.file_name().into_string().unwrap();
+            let filename_with_ext = path?.file_name().into_string().unwrap();
             let filename = filename_with_ext.replace(".json", "");
             let mut splits = filename.split("_");
 
@@ -489,6 +489,7 @@ impl ScpMessageCollector {
 }
 
 fn print_new_transaction_v0(transaction: TransactionV0) {
+    log::info!("--- Processing new v0 transaction ---");
     let source = substrate_stellar_sdk::PublicKey::from_binary(transaction.source_account_ed25519);
 
     let payment_ops: Vec<&PaymentOp> = transaction
@@ -506,22 +507,28 @@ fn print_new_transaction_v0(transaction: TransactionV0) {
     } else {
         for payment_op in payment_ops {
             let amount = payment_op.amount;
-            let currency = payment_op.asset.clone();
+            let asset = payment_op.asset.clone();
             log::info!("{:?}", amount);
-            log::info!("{:?}", currency);
+            log::info!("{:?}", asset);
             log::info!("{:?}", source);
         }
     }
+    log::info!("--- Finish new v0 transaction ---");
 }
+
 fn print_new_transaction(transaction: Transaction) {
+    log::info!("--- Processing new transaction ---");
     let source = if let substrate_stellar_sdk::MuxedAccount::KeyTypeEd25519(key) =
         transaction.source_account
     {
         log::info!(
-            "Pub key {:#?}",
-            substrate_stellar_sdk::PublicKey::from_binary(key)
-                .to_encoding()
-                .to_ascii_lowercase()
+            "Source account {:#?}",
+            std::str::from_utf8(
+                substrate_stellar_sdk::PublicKey::from_binary(key)
+                    .to_encoding()
+                    .as_slice()
+            )
+            .unwrap()
         )
     } else {
         log::error!("❌  Pub key couldn't be decoded");
@@ -543,11 +550,39 @@ fn print_new_transaction(transaction: Transaction) {
     } else {
         for payment_op in payment_ops {
             let amount = payment_op.amount;
-            let currency = payment_op.asset.clone();
+            let asset = payment_op.asset.clone();
             log::info!("{:?}", amount);
-            log::info!("{:?}", currency);
+            print_asset(asset);
             log::info!("{:?}", source);
         }
+    }
+    log::info!("--- Finish new transaction ---");
+}
+
+fn print_asset(asset: Asset) {
+    match asset {
+        Asset::AssetTypeNative => log::info!("XLM"),
+        Asset::AssetTypeCreditAlphanum4(value) => {
+            log::info!(
+                "{:?}",
+                std::str::from_utf8(value.asset_code.as_slice()).unwrap()
+            );
+            log::info!(
+                "{:?}",
+                std::str::from_utf8(value.issuer.to_encoding().as_slice()).unwrap()
+            );
+        }
+        Asset::AssetTypeCreditAlphanum12(value) => {
+            log::info!(
+                "{:?}",
+                std::str::from_utf8(value.asset_code.as_slice()).unwrap()
+            );
+            log::info!(
+                "{:?}",
+                std::str::from_utf8(value.issuer.to_encoding().as_slice()).unwrap()
+            );
+        }
+        Asset::Default(code) => log::info!("Asset type {:?}", code),
     }
 }
 
