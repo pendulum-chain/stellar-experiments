@@ -9,13 +9,14 @@ use std::{
     path::PathBuf,
     str::Split,
 };
-use substrate_stellar_sdk::SecretKey;
+use substrate_stellar_sdk::{
+    types::{PaymentOp, Transaction, TransactionEnvelope, TransactionV0},
+    SecretKey,
+};
 
 use stellar_relay::{
-    connect,
-    helper::{compute_non_generic_tx_set_content_hash, time_now},
-    node::NodeInfo,
-    ConnConfig, Error, StellarNodeMessage, UserControls,
+    connect, helper::compute_non_generic_tx_set_content_hash, node::NodeInfo, ConnConfig, Error,
+    StellarNodeMessage, UserControls,
 };
 
 use stellar_relay::sdk::{
@@ -237,7 +238,6 @@ impl FileHandler<Self> for EnvelopesMap {
 
         if let Some(start_slot) = parse_slot(splits.next()) {
             if let Some(end_slot) = parse_slot(splits.next()) {
-
                 return (slot_param >= start_slot) && (slot_param <= end_slot);
             }
         }
@@ -471,8 +471,83 @@ impl ScpMessageCollector {
         set.txes.get_vec().iter().for_each(|tx_env| {
             let tx_hash = tx_env.get_hash(&self.network);
 
+            match tx_env {
+                TransactionEnvelope::EnvelopeTypeTxV0(value) => {
+                    print_new_transaction_v0(value.tx.clone())
+                }
+                TransactionEnvelope::EnvelopeTypeTx(value) => {
+                    print_new_transaction(value.tx.clone())
+                }
+                TransactionEnvelope::EnvelopeTypeTxFeeBump(_) => {
+                    log::info!("EnvelopeTypeTxFeeBump")
+                }
+                TransactionEnvelope::Default(code) => log::info!("Default: {:?}", code),
+            }
             self.tx_hash_map.insert(tx_hash, slot);
         });
+    }
+}
+
+fn print_new_transaction_v0(transaction: TransactionV0) {
+    let source = substrate_stellar_sdk::PublicKey::from_binary(transaction.source_account_ed25519);
+
+    let payment_ops: Vec<&PaymentOp> = transaction
+        .operations
+        .get_vec()
+        .into_iter()
+        .filter_map(|op| match &op.body {
+            substrate_stellar_sdk::types::OperationBody::Payment(p) => Some(p),
+            _ => None,
+        })
+        .collect();
+
+    if payment_ops.len() == 0 {
+        log::info!("Transaction doesn't include payments");
+    } else {
+        for payment_op in payment_ops {
+            let amount = payment_op.amount;
+            let currency = payment_op.asset.clone();
+            log::info!("{:?}", amount);
+            log::info!("{:?}", currency);
+            log::info!("{:?}", source);
+        }
+    }
+}
+fn print_new_transaction(transaction: Transaction) {
+    let source = if let substrate_stellar_sdk::MuxedAccount::KeyTypeEd25519(key) =
+        transaction.source_account
+    {
+        log::info!(
+            "Pub key {:#?}",
+            substrate_stellar_sdk::PublicKey::from_binary(key)
+                .to_encoding()
+                .to_ascii_lowercase()
+        )
+    } else {
+        log::error!("❌  Pub key couldn't be decoded");
+        return;
+    };
+
+    let payment_ops: Vec<&PaymentOp> = transaction
+        .operations
+        .get_vec()
+        .into_iter()
+        .filter_map(|op| match &op.body {
+            substrate_stellar_sdk::types::OperationBody::Payment(p) => Some(p),
+            _ => None,
+        })
+        .collect();
+
+    if payment_ops.len() == 0 {
+        log::info!("Transaction doesn't include payments");
+    } else {
+        for payment_op in payment_ops {
+            let amount = payment_op.amount;
+            let currency = payment_op.asset.clone();
+            log::info!("{:?}", amount);
+            log::info!("{:?}", currency);
+            log::info!("{:?}", source);
+        }
     }
 }
 
