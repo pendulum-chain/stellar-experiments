@@ -7,10 +7,13 @@ use std::{
     fs::File,
     io::{Read, Write},
     path::PathBuf,
+    str,
     str::Split,
+    string::String,
+    vec,
 };
 use substrate_stellar_sdk::{
-    types::{PaymentOp, Transaction, TransactionEnvelope, TransactionV0},
+    types::{PaymentOp, Transaction, TransactionEnvelope},
     Asset, SecretKey,
 };
 
@@ -64,6 +67,9 @@ pub const MIN_EXTERNALIZED_MESSAGES: usize = 15;
 /// This is both for `TxSetMap` and `TxHashMap`.
 /// When the map reaches the MAX or more, then we write to file.
 pub const MAX_TXS_PER_FILE: Uint64 = 5000;
+
+const VAULT_ADDRESSES_FILTER: &[&str] =
+    &["GB4RUHO227TJJMYNETOCNI67UCIR2XRGQBUN4F6UJKRKLX6EK72Q7VJU"];
 
 impl EnvelopesMap {
     fn new() -> Self {
@@ -472,15 +478,11 @@ impl ScpMessageCollector {
             let tx_hash = tx_env.get_hash(&self.network);
 
             match tx_env {
-                TransactionEnvelope::EnvelopeTypeTxV0(value) => {
-                    print_new_transaction_v0(value.tx.clone())
-                }
+                TransactionEnvelope::EnvelopeTypeTxV0(_) => {}
                 TransactionEnvelope::EnvelopeTypeTx(value) => {
                     print_new_transaction(value.tx.clone())
                 }
-                TransactionEnvelope::EnvelopeTypeTxFeeBump(_) => {
-                    log::info!("EnvelopeTypeTxFeeBump")
-                }
+                TransactionEnvelope::EnvelopeTypeTxFeeBump(_) => {}
                 TransactionEnvelope::Default(code) => log::info!("Default: {:?}", code),
             }
             self.tx_hash_map.insert(tx_hash, slot);
@@ -488,75 +490,86 @@ impl ScpMessageCollector {
     }
 }
 
-fn print_new_transaction_v0(transaction: TransactionV0) {
-    log::info!("--- Processing new v0 transaction ---");
-    let source = substrate_stellar_sdk::PublicKey::from_binary(transaction.source_account_ed25519);
+// fn print_new_transaction_v0(transaction: TransactionV0) {
+//     log::info!("--- Processing new v0 transaction ---");
+//     let source = substrate_stellar_sdk::PublicKey::from_binary(transaction.source_account_ed25519);
 
-    let payment_ops: Vec<&PaymentOp> = transaction
-        .operations
-        .get_vec()
-        .into_iter()
-        .filter_map(|op| match &op.body {
-            substrate_stellar_sdk::types::OperationBody::Payment(p) => Some(p),
-            _ => None,
-        })
-        .collect();
+//     let payment_ops: Vec<&PaymentOp> = transaction
+//         .operations
+//         .get_vec()
+//         .into_iter()
+//         .filter_map(|op| match &op.body {
+//             substrate_stellar_sdk::types::OperationBody::Payment(p) => {
+//                 let d = p.destination.clone();
+//                 if VAULT_ADDRESSES_FILTER
+//                     .contains(&std::str::from_utf8(d.to_encoding().as_slice()).unwrap())
+//                 {
+//                     Some(p)
+//                 } else {
+//                     None
+//                 }
+//             }
+//             _ => None,
+//         })
+//         .collect();
 
-    if payment_ops.len() == 0 {
-        log::info!("Transaction doesn't include payments");
-    } else {
-        for payment_op in payment_ops {
-            let amount = payment_op.amount;
-            let asset = payment_op.asset.clone();
-            log::info!("{:?}", amount);
-            log::info!("{:?}", asset);
-            log::info!("{:?}", source);
-        }
-    }
-    log::info!("--- Finish new v0 transaction ---");
-}
+//     if payment_ops.len() == 0 {
+//         // log::info!("Transaction doesn't include payments to our vault addresses.");
+//     } else {
+//         for payment_op in payment_ops {
+//             let amount = payment_op.amount;
+//             let asset = payment_op.asset.clone();
+//             log::info!("{:?}", amount);
+//             log::info!("{:?}", asset);
+//             log::info!("{:?}", source);
+//         }
+//     }
+//     log::info!("--- Finish new v0 transaction ---");
+// }
 
 fn print_new_transaction(transaction: Transaction) {
-    log::info!("--- Processing new transaction ---");
-    let source = if let substrate_stellar_sdk::MuxedAccount::KeyTypeEd25519(key) =
-        transaction.source_account
-    {
-        log::info!(
-            "Source account {:#?}",
-            std::str::from_utf8(
-                substrate_stellar_sdk::PublicKey::from_binary(key)
-                    .to_encoding()
-                    .as_slice()
-            )
-            .unwrap()
-        )
-    } else {
-        log::error!("❌  Pub key couldn't be decoded");
-        return;
-    };
+    // log::info!("--- Processing new transaction ---");
+    let source = transaction.source_account.clone();
 
     let payment_ops: Vec<&PaymentOp> = transaction
         .operations
         .get_vec()
         .into_iter()
         .filter_map(|op| match &op.body {
-            substrate_stellar_sdk::types::OperationBody::Payment(p) => Some(p),
+            substrate_stellar_sdk::types::OperationBody::Payment(p) => {
+                let d = p.destination.clone();
+                if VAULT_ADDRESSES_FILTER
+                    .contains(&std::str::from_utf8(d.to_encoding().as_slice()).unwrap())
+                {
+                    Some(p)
+                } else {
+                    None
+                }
+            }
             _ => None,
         })
         .collect();
 
     if payment_ops.len() == 0 {
-        log::info!("Transaction doesn't include payments");
+        // log::info!("Transaction doesn't include payments to our vault addresses.");
     } else {
         for payment_op in payment_ops {
             let amount = payment_op.amount;
             let asset = payment_op.asset.clone();
-            log::info!("{:?}", amount);
+            let destination = payment_op.destination.clone();
+            log::info!("Deposit amount {:?}", amount);
             print_asset(asset);
-            log::info!("{:?}", source);
+            log::info!(
+                "From {:#?}",
+                std::str::from_utf8(source.to_encoding().as_slice()).unwrap()
+            );
+            log::info!(
+                "To {:?}",
+                std::str::from_utf8(destination.to_encoding().as_slice()).unwrap()
+            );
         }
     }
-    log::info!("--- Finish new transaction ---");
+    // log::info!("--- Finish new transaction ---");
 }
 
 fn print_asset(asset: Asset) {
@@ -598,7 +611,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     fs::create_dir_all("./tx_sets")?;
     fs::create_dir_all("./tx_hashes")?;
 
-    let network = Network::new(b"Public Global Stellar Network ; September 2015");
+    let network = Network::new(b"Test SDF Network ; September 2015");
 
     let secret =
         SecretKey::from_encoding("SBLI7RKEJAEFGLZUBSCOFJHQBPFYIIPLBCKN7WVCWT4NEG2UJEW33N73")
@@ -606,7 +619,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let node_info = NodeInfo::new(19, 21, 19, "v19.1.0".to_string(), &network);
 
-    let cfg = ConnConfig::new("135.181.16.110", 11625, secret, 0, false, true, false);
+    let cfg = ConnConfig::new("34.235.168.98", 11625, secret, 0, false, true, false);
 
     let mut user: UserControls = connect(node_info, cfg).await?;
 
