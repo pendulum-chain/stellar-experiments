@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 use std::collections::{BTreeMap, HashMap};
+use std::vec;
 use stellar_relay::{connect, node::NodeInfo, ConnConfig, StellarNodeMessage, UserControls};
 use substrate_stellar_sdk::compound_types::UnlimitedVarArray;
 use substrate_stellar_sdk::network::{Network, PUBLIC_NETWORK, TEST_NETWORK};
@@ -497,7 +498,7 @@ mod collector {
         ///
         /// * `set` - the TransactionSet
         /// * `txset_hash_map` - provides the slot number of the given Transaction Set Hash
-        pub(crate) fn handle_tx_set(
+        pub(crate) async fn handle_tx_set(
             &mut self,
             set: &TransactionSet,
             txset_hash_map: &mut TxSetCheckerMap,
@@ -509,7 +510,7 @@ mod collector {
 
             if let Some(slot) = txset_hash_map.remove(&tx_set_hash) {
                 self.txset_map.insert(slot, set.clone());
-                self.update_tx_hash_map(slot, set);
+                self.update_tx_hash_map(slot, set).await?;
             } else {
                 log::info!("WARNING! tx_set_hash: {:?} has no slot.", tx_set_hash);
             }
@@ -540,27 +541,32 @@ mod collector {
         }
 
         /// maps the slot to the transactions of the TransactionSet
-        fn update_tx_hash_map(&mut self, slot: Slot, set: &TransactionSet) {
+        async fn update_tx_hash_map(
+            &mut self,
+            slot: Slot,
+            tx_set: &TransactionSet,
+        ) -> Result<(), Error> {
             log::info!("slot: {} inserting transacion set", slot);
-            set.txes.get_vec().iter().for_each(|tx_env| {
+            let mut txs_to_validate: Vec<TransactionEnvelope> = Vec::new();
+
+            // Collect tx hashes to build proofs, and transactions to validate
+            tx_set.txes.get_vec().iter().for_each(|tx_env| {
                 let tx_hash = tx_env.get_hash(&self.network);
 
                 fn check_memo(memo: &Memo) -> bool {
-                    // based on Marcel's comments:
-                    // but we could extend the memo filtering technique to only store
-                    // tx hashes for transactions that have a MEMO_TEXT of size 32byte
-                    // or a MEMO_HASH with a hash.
                     match memo {
-                        Memo::MemoText(t) if t.len() <= 32 => true,
+                        Memo::MemoText(t) if t.len() > 0 => true,
                         Memo::MemoHash(_) => true,
                         _ => false,
                     }
                 }
 
-                let is_save_tx = match tx_env {
+                let save_tx = match tx_env {
                     TransactionEnvelope::EnvelopeTypeTxV0(value) => check_memo(&value.tx.memo),
                     TransactionEnvelope::EnvelopeTypeTx(value) => {
-                        print_new_transaction(value.tx.clone());
+                        if is_tx_relevant(&value.tx) {
+                            txs_to_validate.push(tx_env.clone());
+                        }
                         check_memo(&value.tx.memo)
                     }
                     TransactionEnvelope::EnvelopeTypeTxFeeBump(_) => false,
@@ -570,10 +576,15 @@ mod collector {
                     }
                 };
 
-                if is_save_tx {
+                if save_tx {
                     self.tx_hash_map.insert(tx_hash, slot);
                 }
             });
+            // Send validation proofs
+            for tx_env in txs_to_validate.iter() {
+                tx_handler::handle_tx(tx_env.clone(), self).await?;
+            }
+            Ok(())
         }
     }
 
@@ -596,28 +607,22 @@ mod tx_handler {
     pub async fn handle_tx(
         tx_env: TransactionEnvelope,
         collector: &ScpMessageCollector,
-        api: &OnlineClient<PolkadotConfig>,
     ) -> Result<(), Error> {
-        //TODO: filter on which transaction
+        let api = OnlineClient::<PolkadotConfig>::new().await.unwrap();
 
         if let Some((envelopes, txset)) = build_proof(&tx_env, collector) {
             let (tx_env, envelopes, txset) = encode(tx_env, envelopes, txset);
-            // this is assuming that the extrinsic looks like:
-            // pub fn validate_stellar_transaction_ext(origin: OriginFor<T>,
-            //                                        transaction_envelope_xdr: Vec<u8>,
-            //                                        envelopes_xdr: Vec<u8>,
-            //                                        transaction_set_xdr: Vec<u8>
-            // )
             let tx = spacewalk_chain::tx()
                 .stellar_relay()
                 .validate_stellar_transaction_ext(
                     tx_env.as_bytes().to_vec(),
                     envelopes.as_bytes().to_vec(),
                     txset.as_bytes().to_vec(),
+                    collector.is_public(),
                 );
             let signer = PairSigner::new(AccountKeyring::Alice.pair());
             let hash = api.tx().sign_and_submit_default(&tx, &signer).await?;
-            log::debug!("extrinsic submitted: {:?}", hash);
+            log::info!("extrinsic submitted: {:?}", hash);
         }
 
         Ok(())
@@ -675,17 +680,13 @@ use constants::*;
 use error::Error;
 use handler::*;
 use traits::*;
-use tx_handler::*;
 use types::*;
 
 use sp_keyring::AccountKeyring;
 use subxt::{tx::PairSigner, OnlineClient, PolkadotConfig};
 
-fn print_new_transaction(transaction: Transaction) {
-    // log::info!("--- Processing new transaction ---");
-    let source = transaction.source_account.clone();
-
-    let payment_ops: Vec<&PaymentOp> = transaction
+fn is_tx_relevant(transaction: &Transaction) -> bool {
+    let payment_ops_to_vault_address: Vec<&PaymentOp> = transaction
         .operations
         .get_vec()
         .into_iter()
@@ -704,13 +705,17 @@ fn print_new_transaction(transaction: Transaction) {
         })
         .collect();
 
-    if payment_ops.len() == 0 {
-        // log::info!("Transaction doesn't include payments to our vault addresses.");
+    if payment_ops_to_vault_address.len() == 0 {
+        // The transaction is not relevant to use since it doesn't
+        // include a payment to our vault address
+        return false;
     } else {
-        for payment_op in payment_ops {
+        log::info!("Transaction to our vault address received.");
+        let source = transaction.source_account.clone();
+        for payment_op in payment_ops_to_vault_address {
+            let destination = payment_op.destination.clone();
             let amount = payment_op.amount;
             let asset = payment_op.asset.clone();
-            let destination = payment_op.destination.clone();
             log::info!("Deposit amount {:?}", amount);
             print_asset(asset);
             log::info!(
@@ -722,8 +727,8 @@ fn print_new_transaction(transaction: Transaction) {
                 std::str::from_utf8(destination.to_encoding().as_slice()).unwrap()
             );
         }
+        return true;
     }
-    // log::info!("--- Finish new transaction ---");
 }
 
 fn print_asset(asset: Asset) {
@@ -801,30 +806,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 StellarMessage::TxSet(set) => {
                     log::info!("---- PID: {} Handle {:?}----", p_id, msg_type);
-                    collector.handle_tx_set(&set, &mut tx_set_hash_map)?;
-                }
-                StellarMessage::Transaction(_) => {
-                    //TODO: remove this part here, and replace it with an actual code.
-                    counter += 1;
-
-                    use rand::seq::{IteratorRandom, SliceRandom};
-                    use rand::thread_rng;
-
-                    if counter % 50 == 0 {
-                        let keys = collector.tx_hash_map().keys();
-                        let random_key = keys.choose(&mut thread_rng()).unwrap();
-                        log::info!("chose key: {:?}", random_key);
-
-                        let slot = collector.tx_hash_map().get(random_key).unwrap();
-                        let txset = collector.txset_map().get(slot).unwrap();
-
-                        let tx_vec = txset.txes.get_vec();
-                        let x = tx_vec.choose(&mut thread_rng()).unwrap();
-
-                        handle_tx(x.clone(), &collector, &api).await?;
-                    } else {
-                        log::info!("found transaction at counter {}", counter);
-                    }
+                    collector.handle_tx_set(&set, &mut tx_set_hash_map).await?;
                 }
                 _ => {}
             },
