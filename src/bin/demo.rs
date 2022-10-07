@@ -2,17 +2,28 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::vec;
-use stellar_relay::{connect, node::NodeInfo, ConnConfig, StellarNodeMessage, UserControls};
+
+use sp_keyring::AccountKeyring;
+use substrate_stellar_sdk::{Asset, SecretKey, Transaction};
 use substrate_stellar_sdk::compound_types::UnlimitedVarArray;
 use substrate_stellar_sdk::network::{Network, PUBLIC_NETWORK, TEST_NETWORK};
+use substrate_stellar_sdk::TransactionEnvelope;
 use substrate_stellar_sdk::types::{
     PaymentOp, ScpEnvelope, StellarMessage, TransactionSet, Uint64,
 };
-use substrate_stellar_sdk::TransactionEnvelope;
-use substrate_stellar_sdk::{Asset, SecretKey, Transaction};
+use subxt::{OnlineClient, PolkadotConfig, tx::PairSigner};
+
+use collector::*;
+use constants::*;
+use error::Error;
+use handler::*;
+use stellar_relay::{ConnConfig, connect, node::NodeInfo, StellarNodeMessage, UserControls};
+use traits::*;
+use types::*;
 
 mod error {
     use std::array::TryFromSliceError;
+
     use substrate_stellar_sdk::StellarSdkError;
 
     #[derive(Debug, err_derive::Error)]
@@ -77,8 +88,9 @@ mod error {
 }
 
 mod types {
-    use super::*;
     use substrate_stellar_sdk::types::{Hash, ScpEnvelope};
+
+    use super::*;
 
     pub type Slot = Uint64;
     pub type TxHash = Hash;
@@ -118,19 +130,20 @@ mod constants {
     pub const MAX_TXS_PER_FILE: Uint64 = 10_000_000;
 
     pub const VAULT_ADDRESSES_FILTER: &[&str] =
-        &["GB4RUHO227TJJMYNETOCNI67UCIR2XRGQBUN4F6UJKRKLX6EK72Q7VJU"];
+        &["GAP4SFKVFVKENJ7B7VORAYKPB3CJIAJ2LMKDJ22ZFHIAIVYQOR6W3CXF"];
 
     pub const TIER_1_VALIDATOR_IP_TESTNET: &str = "34.235.168.98";
     pub const TIER_1_VALIDATOR_IP_PUBLIC: &str = "135.181.16.110";
 }
 
 mod traits {
-    use super::*;
     use std::fs;
     use std::fs::File;
     use std::io::{Read, Write};
     use std::path::PathBuf;
     use std::str::Split;
+
+    use super::*;
 
     pub trait FileHandlerExt<T: Default>: FileHandler<T> {
         fn create_filename_and_data(data: &T) -> Result<(Filename, SerializedData), Error>;
@@ -203,14 +216,18 @@ mod traits {
 }
 
 mod handler {
-    use super::*;
     use std::fs::{create_dir_all, File};
     use std::io::Write;
     use std::str::Split;
+
     use substrate_stellar_sdk::XdrCodec;
 
+    use super::*;
+
     pub struct EnvelopesFileHandler;
+
     pub struct TxSetsFileHandler;
+
     pub struct TxHashesFileHandler;
 
     impl FileHandler<EnvelopesMap> for EnvelopesFileHandler {
@@ -350,10 +367,12 @@ mod handler {
 }
 
 mod collector {
-    use super::*;
-    use stellar_relay::helper::compute_non_generic_tx_set_content_hash;
-    use substrate_stellar_sdk::types::{ScpStatementExternalize, ScpStatementPledges};
     use substrate_stellar_sdk::Memo;
+    use substrate_stellar_sdk::types::{ScpStatementExternalize, ScpStatementPledges};
+
+    use stellar_relay::helper::compute_non_generic_tx_set_content_hash;
+
+    use super::*;
 
     pub struct ScpMessageCollector {
         /// holds the mapping of the Slot Number(key) and the ScpEnvelopes(value)
@@ -362,16 +381,16 @@ mod collector {
         txset_map: TxSetMap,
         /// holds the mapping of the Transaction Hash(key) and the Slot Number(value)
         tx_hash_map: TxHashMap,
-        network: Network,
+        public_network: bool,
     }
 
     impl ScpMessageCollector {
-        pub fn new(network: Network) -> Self {
+        pub fn new(public_network: bool) -> Self {
             ScpMessageCollector {
                 envelopes_map: Default::default(),
                 txset_map: Default::default(),
                 tx_hash_map: Default::default(),
-                network,
+                public_network,
             }
         }
 
@@ -388,13 +407,15 @@ mod collector {
         }
 
         pub fn network(&self) -> &Network {
-            &self.network
+            if self.public_network {
+                &PUBLIC_NETWORK
+            } else {
+                &TEST_NETWORK
+            }
         }
 
         pub fn is_public(&self) -> bool {
-            self.network
-                .get_passphrase()
-                .eq(PUBLIC_NETWORK.get_passphrase())
+            self.public_network
         }
 
         /// handles incoming ScpEnvelope.
@@ -551,7 +572,7 @@ mod collector {
 
             // Collect tx hashes to build proofs, and transactions to validate
             tx_set.txes.get_vec().iter().for_each(|tx_env| {
-                let tx_hash = tx_env.get_hash(&self.network);
+                let tx_hash = tx_env.get_hash(self.network());
 
                 fn check_memo(memo: &Memo) -> bool {
                     match memo {
@@ -602,8 +623,9 @@ mod collector {
 }
 
 mod tx_handler {
-    use super::*;
     use substrate_stellar_sdk::XdrCodec;
+
+    use super::*;
 
     pub struct Proof {
         tx_env: TransactionEnvelope,
@@ -681,16 +703,6 @@ mod tx_handler {
         Some((envelopes, tx_set))
     }
 }
-
-use collector::*;
-use constants::*;
-use error::Error;
-use handler::*;
-use traits::*;
-use types::*;
-
-use sp_keyring::AccountKeyring;
-use subxt::{tx::PairSigner, OnlineClient, PolkadotConfig};
 
 fn is_tx_relevant(transaction: &Transaction) -> bool {
     let payment_ops_to_vault_address: Vec<&PaymentOp> = transaction
@@ -775,13 +787,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let args: Vec<String> = std::env::args().collect();
     let arg_network = &args[1];
-    let mut network: Network = Network::new(TEST_NETWORK.get_passphrase());
+    let mut public_network = false;
     let mut tier1_node_ip = TIER_1_VALIDATOR_IP_TESTNET;
 
     if arg_network == "mainnet" {
-        network = Network::new(PUBLIC_NETWORK.get_passphrase());
+        public_network = true;
         tier1_node_ip = TIER_1_VALIDATOR_IP_PUBLIC;
     }
+    let network: &Network = if public_network {
+        &PUBLIC_NETWORK
+    } else {
+        &TEST_NETWORK
+    };
+
     log::info!(
         "Connected to {:?} through {:?}",
         std::str::from_utf8(network.get_passphrase().as_slice()).unwrap(),
@@ -792,10 +810,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         SecretKey::from_encoding("SBLI7RKEJAEFGLZUBSCOFJHQBPFYIIPLBCKN7WVCWT4NEG2UJEW33N73")
             .unwrap();
 
-    let node_info = NodeInfo::new(19, 21, 19, "v19.1.0".to_string(), &network);
+    let node_info = NodeInfo::new(19, 21, 19, "v19.1.0".to_string(), network);
     let cfg = ConnConfig::new(tier1_node_ip, 11625, secret, 0, true, true, false);
     let mut user: UserControls = connect(node_info, cfg).await?;
-    let mut collector = ScpMessageCollector::new(network);
+    let mut collector = ScpMessageCollector::new(public_network);
 
     let mut tx_set_hash_map: TxSetCheckerMap = HashMap::new();
 
@@ -826,10 +844,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 #[cfg(test)]
 mod test {
-    use super::*;
     use std::env;
-    use stellar_relay::helper::compute_non_generic_tx_set_content_hash;
+
     use substrate_stellar_sdk::types::ScpStatementPledges;
+
+    use stellar_relay::helper::compute_non_generic_tx_set_content_hash;
+
+    use super::*;
 
     #[test]
     fn find_file_successful() {
