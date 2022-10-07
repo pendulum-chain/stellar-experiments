@@ -1,7 +1,7 @@
 use substrate_stellar_sdk::compound_types::LimitedString;
 
 use crate::node::NodeInfo;
-use crate::Error;
+use crate::ConnectionError;
 use substrate_stellar_sdk::types::{Auth, AuthCert, Hello, StellarMessage, Uint256};
 use substrate_stellar_sdk::PublicKey;
 
@@ -24,7 +24,7 @@ pub fn create_hello_message(
     cert: AuthCert,
     listening_port: u32,
     node_info: &NodeInfo,
-) -> Result<StellarMessage, Error> {
+) -> Result<StellarMessage, ConnectionError> {
     let version_str = &node_info.version_str;
 
     let hello = Hello {

@@ -5,7 +5,7 @@ use crate::connection::helper::{generate_random_nonce, time_now};
 use crate::connection::hmac::{
     create_receiving_mac_key, create_sending_mac_key, create_sha256_hmac, verify_hmac,
 };
-use crate::Error;
+use crate::ConnectionError;
 use substrate_stellar_sdk::network::Network;
 use substrate_stellar_sdk::types::{AuthCert, Curve25519Public, HmacSha256Mac};
 use substrate_stellar_sdk::{SecretKey, XdrCodec};
@@ -50,7 +50,7 @@ fn expired_auth_cert() {
 
     let time_now = time_now();
 
-    if let Err(Error::AuthCertNotFound) = auth.auth_cert(time_now) {
+    if let Err(ConnectionError::AuthCertNotFound) = auth.auth_cert(time_now) {
         assert!(true);
     } else {
         assert!(false);
@@ -74,7 +74,7 @@ fn expired_auth_cert() {
     // expired
     let new_time = time_now + (AUTH_CERT_EXPIRATION_LIMIT / 2) + 100;
 
-    if let Err(Error::AuthCertExpired) = auth.auth_cert(new_time) {
+    if let Err(ConnectionError::AuthCertExpired) = auth.auth_cert(new_time) {
         assert!(true);
     } else {
         assert!(false);

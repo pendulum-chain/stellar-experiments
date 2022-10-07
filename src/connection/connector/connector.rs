@@ -2,7 +2,7 @@ use crate::connection::authentication::{gen_shared_key, ConnectionAuth};
 use crate::connection::flow_controller::FlowController;
 use crate::connection::hmac::{verify_hmac, HMacKeys};
 use crate::handshake::HandshakeState;
-use crate::{ConnConfig, ConnectorActions, Error, StellarNodeMessage};
+use crate::{ConnConfig, ConnectionError, ConnectorActions, StellarNodeMessage};
 use substrate_stellar_sdk::types::{
     AuthenticatedMessageV0, Curve25519Public, HmacSha256Mac, MessageType,
 };
@@ -39,8 +39,8 @@ impl Connector {
         &self,
         auth_msg: &AuthenticatedMessageV0,
         body: &[u8],
-    ) -> Result<(), Error> {
-        let remote = self.remote.as_ref().ok_or(Error::NoRemoteInfo)?;
+    ) -> Result<(), ConnectionError> {
+        let remote = self.remote.as_ref().ok_or(ConnectionError::NoRemoteInfo)?;
         log::debug!(
             "remote sequence: {}, auth message sequence: {}",
             remote.sequence(),
@@ -48,10 +48,13 @@ impl Connector {
         );
         if remote.sequence() != auth_msg.sequence {
             //must be handled on main thread because workers could mix up order of messages.
-            return Err(Error::InvalidSequenceNumber);
+            return Err(ConnectionError::InvalidSequenceNumber);
         }
 
-        let keys = self.hmac_keys.as_ref().ok_or(Error::MissingHmacKeys)?;
+        let keys = self
+            .hmac_keys
+            .as_ref()
+            .ok_or(ConnectionError::MissingHmacKeys)?;
         verify_hmac(body, &keys.receiving().mac, &auth_msg.mac.to_xdr())?;
 
         Ok(())
@@ -131,11 +134,11 @@ impl Connector {
         self.remote = Some(value);
     }
 
-    pub fn increment_remote_sequence(&mut self) -> Result<(), Error> {
+    pub fn increment_remote_sequence(&mut self) -> Result<(), ConnectionError> {
         self.remote
             .as_mut()
             .map(|remote| remote.increment_sequence())
-            .ok_or(Error::NoRemoteInfo)
+            .ok_or(ConnectionError::NoRemoteInfo)
     }
 
     pub fn hmac_keys(&self) -> Option<&HMacKeys> {
@@ -172,15 +175,18 @@ impl Connector {
         self.handshake_state = HandshakeState::Completed;
     }
 
-    pub async fn send_to_user(&self, msg: StellarNodeMessage) -> Result<(), Error> {
+    pub async fn send_to_user(&self, msg: StellarNodeMessage) -> Result<(), ConnectionError> {
         self.stellar_message_writer
             .send(msg)
             .await
-            .map_err(Error::from)
+            .map_err(ConnectionError::from)
     }
 
-    pub async fn send_to_node(&self, action: ConnectorActions) -> Result<(), Error> {
-        self.stream_writer.send(action).await.map_err(Error::from)
+    pub async fn send_to_node(&self, action: ConnectorActions) -> Result<(), ConnectionError> {
+        self.stream_writer
+            .send(action)
+            .await
+            .map_err(ConnectionError::from)
     }
 
     pub fn inner_check_to_send_more(&mut self, msg_type: MessageType) -> bool {

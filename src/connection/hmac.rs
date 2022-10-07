@@ -1,4 +1,4 @@
-use crate::Error;
+use crate::ConnectionError;
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
 use substrate_stellar_sdk::types::{HmacSha256Mac, Uint256};
@@ -111,10 +111,15 @@ pub fn create_sha256_hmac(data_buffer: &[u8], mac_key_buffer: &Buffer) -> Option
     None
 }
 
-pub fn verify_hmac(data_buffer: &[u8], mac_key_buffer: &Buffer, mac: &[u8]) -> Result<(), Error> {
-    let mut hmac =
-        HmacSha256::new_from_slice(mac_key_buffer).map_err(|_| Error::HmacInvalidLength)?;
+pub fn verify_hmac(
+    data_buffer: &[u8],
+    mac_key_buffer: &Buffer,
+    mac: &[u8],
+) -> Result<(), ConnectionError> {
+    let mut hmac = HmacSha256::new_from_slice(mac_key_buffer)
+        .map_err(|_| ConnectionError::HmacInvalidLength)?;
 
     hmac.update(data_buffer);
-    hmac.verify_slice(mac).map_err(|e| Error::HmacError(e))
+    hmac.verify_slice(mac)
+        .map_err(|e| ConnectionError::HmacError(e))
 }

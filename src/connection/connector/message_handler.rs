@@ -5,13 +5,13 @@ use crate::connection::xdr_converter::parse_authenticated_message;
 use crate::connection::Connector;
 use crate::connection::Xdr;
 use crate::node::RemoteInfo;
-use crate::{Error, StellarNodeMessage};
+use crate::{ConnectionError, StellarNodeMessage};
 use substrate_stellar_sdk::types::{Hello, MessageType, StellarMessage};
 use substrate_stellar_sdk::XdrCodec;
 
 impl Connector {
     /// Processes the raw bytes from the stream
-    pub(crate) async fn process_raw_message(&mut self, xdr: Xdr) -> Result<(), Error> {
+    pub(crate) async fn process_raw_message(&mut self, xdr: Xdr) -> Result<(), ConnectionError> {
         let (proc_id, data) = xdr;
         let (auth_msg, msg_type) = parse_authenticated_message(&data)?;
 
@@ -48,7 +48,7 @@ impl Connector {
         p_id: u32,
         msg: StellarMessage,
         msg_type: MessageType,
-    ) -> Result<(), Error> {
+    ) -> Result<(), ConnectionError> {
         match msg {
             StellarMessage::Hello(hello) => {
                 // update the node info based on the hello message
@@ -85,7 +85,7 @@ impl Connector {
         Ok(())
     }
 
-    async fn process_auth_message(&mut self) -> Result<(), Error> {
+    async fn process_auth_message(&mut self) -> Result<(), ConnectionError> {
         if self.remote_called_us() {
             self.send_auth_message().await?;
         }
@@ -112,11 +112,11 @@ impl Connector {
     }
 
     /// Updates the config based on the hello message that was received from the Stellar Node
-    fn process_hello_message(&mut self, hello: Hello) -> Result<(), Error> {
+    fn process_hello_message(&mut self, hello: Hello) -> Result<(), ConnectionError> {
         let mut network_id = self.connection_auth.network_id().to_xdr();
 
         if !verify_remote_auth_cert(time_now(), &hello.peer_id, &hello.cert, &mut network_id) {
-            return Err(Error::AuthCertInvalid);
+            return Err(ConnectionError::AuthCertInvalid);
         }
 
         let remote_info = RemoteInfo::new(&hello);

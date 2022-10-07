@@ -11,7 +11,7 @@ mod user_controls;
 pub mod xdr_converter;
 
 pub(crate) use connector::*;
-pub use errors::Error;
+pub use errors::Error as ConnectionError;
 pub use services::*;
 pub use user_controls::*;
 

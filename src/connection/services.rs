@@ -2,16 +2,18 @@ use crate::connection::connector::{Connector, ConnectorActions};
 use crate::connection::helper::time_now;
 use crate::connection::xdr_converter::get_xdr_message_length;
 use crate::node::NodeInfo;
-use crate::Error;
+use crate::ConnectionError;
 use crate::{ConnConfig, StellarNodeMessage, UserControls};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{tcp, TcpStream};
 use tokio::sync::mpsc;
 
-async fn create_stream(address: &str) -> Result<(tcp::OwnedReadHalf, tcp::OwnedWriteHalf), Error> {
+async fn create_stream(
+    address: &str,
+) -> Result<(tcp::OwnedReadHalf, tcp::OwnedWriteHalf), ConnectionError> {
     let stream = TcpStream::connect(address)
         .await
-        .map_err(|e| Error::ConnectionFailed(e.to_string()))?;
+        .map_err(|e| ConnectionError::ConnectionFailed(e.to_string()))?;
 
     Ok(stream.into_split())
 }
@@ -29,11 +31,14 @@ async fn next_message_length(r_stream: &mut tcp::OwnedReadHalf) -> usize {
 }
 
 /// reads data from the stream and store to buffer
-async fn read_stream(r_stream: &mut tcp::OwnedReadHalf, buffer: &mut [u8]) -> Result<usize, Error> {
+async fn read_stream(
+    r_stream: &mut tcp::OwnedReadHalf,
+    buffer: &mut [u8],
+) -> Result<usize, ConnectionError> {
     r_stream
         .read(buffer)
         .await
-        .map_err(|e| Error::ReadFailed(e.to_string()))
+        .map_err(|e| ConnectionError::ReadFailed(e.to_string()))
 }
 
 /// sends the HandleMessage action to the connector
@@ -41,11 +46,11 @@ async fn handle_message(
     tx_stream_reader: &mpsc::Sender<ConnectorActions>,
     proc_id: u32,
     xdr_msg: Vec<u8>,
-) -> Result<(), Error> {
+) -> Result<(), ConnectionError> {
     tx_stream_reader
         .send(ConnectorActions::HandleMessage((proc_id, xdr_msg)))
         .await
-        .map_err(Error::from)
+        .map_err(ConnectionError::from)
 }
 
 /// reads a continuation of bytes that belong to the previous message
@@ -62,7 +67,7 @@ async fn read_unfinished_message(
     lack_bytes_from_prev: &mut usize,
     proc_id: &mut u32,
     readbuf: &mut Vec<u8>,
-) -> Result<(), Error> {
+) -> Result<(), ConnectionError> {
     // let's read the continuation number of bytes from the previous message.
     let mut cont_buf = vec![0; *lack_bytes_from_prev];
 
@@ -113,7 +118,7 @@ async fn read_message(
     proc_id: &mut u32,
     readbuf: &mut Vec<u8>,
     xpect_msg_len: usize,
-) -> Result<(), Error> {
+) -> Result<(), ConnectionError> {
     let actual_msg_len = read_stream(r_stream, readbuf).await?;
 
     // only when the message has the exact expected size bytes, should we send to user.
@@ -144,7 +149,7 @@ async fn read_message(
 async fn receiving_service(
     mut r_stream: tcp::OwnedReadHalf,
     tx_stream_reader: mpsc::Sender<ConnectorActions>,
-) -> Result<(), Error> {
+) -> Result<(), ConnectionError> {
     let mut proc_id = 0;
 
     // holds the number of bytes that were missing from the previous stellar message.
@@ -211,7 +216,7 @@ async fn connection_handler(
     mut conn: Connector,
     mut receiver: mpsc::Receiver<ConnectorActions>,
     mut w_stream: tcp::OwnedWriteHalf,
-) -> Result<(), Error> {
+) -> Result<(), ConnectionError> {
     loop {
         match receiver.recv().await {
             // write message to the stream
@@ -220,7 +225,7 @@ async fn connection_handler(
                 w_stream
                     .write_all(&xdr_msg)
                     .await
-                    .map_err(|e| Error::WriteFailed(e.to_string()))?;
+                    .map_err(|e| ConnectionError::WriteFailed(e.to_string()))?;
             }
 
             // handle incoming message from the stream
@@ -235,7 +240,7 @@ async fn connection_handler(
                 w_stream
                     .write_all(&msg)
                     .await
-                    .map_err(|e| Error::WriteFailed(e.to_string()))?;
+                    .map_err(|e| ConnectionError::WriteFailed(e.to_string()))?;
             }
 
             None => {}
@@ -245,7 +250,10 @@ async fn connection_handler(
 
 /// Triggers connection to the Stellar Node.
 /// Returns the UserControls for the user to send and receive Stellar messages.
-pub async fn connect(local_node: NodeInfo, cfg: ConnConfig) -> Result<UserControls, Error> {
+pub async fn connect(
+    local_node: NodeInfo,
+    cfg: ConnConfig,
+) -> Result<UserControls, ConnectionError> {
     // split the stream for easy handling of read and write
     let (rd, wr) = create_stream(&cfg.address()).await?;
 

@@ -1,7 +1,7 @@
 use crate::connection::authentication::{
     BinarySha256Hash, ConnectionAuth, AUTH_CERT_EXPIRATION_LIMIT,
 };
-use crate::Error;
+use crate::ConnectionError;
 use sha2::{Digest, Sha256};
 use substrate_stellar_sdk::types::{AuthCert, Curve25519Public, EnvelopeType, Signature};
 use substrate_stellar_sdk::{PublicKey, SecretKey, XdrCodec};
@@ -12,12 +12,12 @@ impl ConnectionAuth {
     ///
     /// # Arguments
     /// * `valid_at` - the validity start date in milliseconds.
-    pub fn auth_cert(&self, valid_at: u64) -> Result<&AuthCert, Error> {
+    pub fn auth_cert(&self, valid_at: u64) -> Result<&AuthCert, ConnectionError> {
         self.saved_auth_cert()
-            .ok_or(Error::AuthCertNotFound)
+            .ok_or(ConnectionError::AuthCertNotFound)
             .and_then(|auth_cert| {
                 if self.auth_cert_expiration() < (valid_at + AUTH_CERT_EXPIRATION_LIMIT / 2) {
-                    Err(Error::AuthCertExpired)
+                    Err(ConnectionError::AuthCertExpired)
                 } else {
                     Ok(auth_cert)
                 }
@@ -35,7 +35,7 @@ pub fn create_auth_cert(
     keypair: &SecretKey,
     valid_at: u64,
     pub_key_ecdh: Curve25519Public,
-) -> Result<AuthCert, Error> {
+) -> Result<AuthCert, ConnectionError> {
     let mut network_id_xdr = network_id.to_xdr();
     let expiration = valid_at + AUTH_CERT_EXPIRATION_LIMIT;
 

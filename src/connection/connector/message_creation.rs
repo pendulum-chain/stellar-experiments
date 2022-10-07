@@ -1,7 +1,7 @@
 use crate::connection::authentication::create_auth_cert;
 use crate::connection::handshake;
 use crate::connection::hmac::create_sha256_hmac;
-use crate::{xdr_converter, Connector, Error};
+use crate::{xdr_converter, ConnectionError, Connector};
 use substrate_stellar_sdk::types::{
     AuthenticatedMessage, AuthenticatedMessageV0, HmacSha256Mac, StellarMessage,
 };
@@ -29,9 +29,9 @@ impl Connector {
         AuthenticatedMessage::V0(auth_message_v0)
     }
 
-    pub fn create_xdr_message(&mut self, msg: StellarMessage) -> Result<Vec<u8>, Error> {
+    pub fn create_xdr_message(&mut self, msg: StellarMessage) -> Result<Vec<u8>, ConnectionError> {
         let auth_msg = self.authenticate_message(msg);
-        xdr_converter::from_authenticated_message(&auth_msg).map_err(Error::from)
+        xdr_converter::from_authenticated_message(&auth_msg).map_err(ConnectionError::from)
     }
 
     /// Returns HmacSha256Mac for the AuthenticatedMessage
@@ -53,7 +53,7 @@ impl Connector {
     }
 
     /// The hello message is dependent on the auth cert
-    pub fn create_hello_message(&mut self, valid_at: u64) -> Result<Vec<u8>, Error> {
+    pub fn create_hello_message(&mut self, valid_at: u64) -> Result<Vec<u8>, ConnectionError> {
         let auth_cert = match self.connection_auth.auth_cert(valid_at) {
             Ok(auth_cert) => auth_cert.clone(),
             Err(_) => {

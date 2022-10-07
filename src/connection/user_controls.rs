@@ -1,5 +1,5 @@
 use crate::connection::connector::ConnectorActions;
-use crate::Error;
+use crate::ConnectionError;
 use crate::StellarNodeMessage;
 use substrate_stellar_sdk::types::StellarMessage;
 use tokio::sync::mpsc;
@@ -15,11 +15,11 @@ impl UserControls {
     pub fn new(tx: mpsc::Sender<ConnectorActions>, rx: mpsc::Receiver<StellarNodeMessage>) -> Self {
         UserControls { tx, rx }
     }
-    pub async fn send(&self, message: StellarMessage) -> Result<(), Error> {
+    pub async fn send(&self, message: StellarMessage) -> Result<(), ConnectionError> {
         self.tx
             .send(ConnectorActions::SendMessage(message))
             .await
-            .map_err(Error::from)
+            .map_err(ConnectionError::from)
     }
 
     /// Receives Stellar messages from the connection.

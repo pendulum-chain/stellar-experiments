@@ -30,6 +30,9 @@ serde = {version = "1.0.130", features = ["derive"]}
 serde_json = {version = '1.0.45'}
 
 substrate-stellar-sdk = {git = "https://github.com/pendulum-chain/substrate-stellar-sdk", branch = "master", default-features = false, features = ['all-types']}
+subxt = "0.24.0"
+sp-keyring = "6.0.0"
+parity-scale-codec = "3.2.1"
 
 err-derive = "0.3.1"
 tokio = {version = "1.0", features = ["full"]}
