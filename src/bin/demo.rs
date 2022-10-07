@@ -542,7 +542,11 @@ mod collector {
                     // tx hashes for transactions that have a MEMO_TEXT of size 32byte
                     // or a MEMO_HASH with a hash.
                     match memo {
-                        Memo::MemoText(t) if t.len() <= 32 => true,
+                        Memo::MemoText(t) if t.len() > 0 && t.len() <= 32 => {
+                            std::str::from_utf8(t.get_vec())
+                                .and_then(|memo_text| Ok(memo_text.contains("demo")))
+                                .unwrap_or(false)
+                        }
                         Memo::MemoHash(_) => true,
                         _ => false,
                     }
