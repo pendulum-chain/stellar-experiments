@@ -5,7 +5,7 @@ use stellar_relay::{connect, node::NodeInfo, ConnConfig, StellarNodeMessage, Use
 use substrate_stellar_sdk::compound_types::UnlimitedVarArray;
 use substrate_stellar_sdk::network::Network;
 use substrate_stellar_sdk::types::{
-    PaymentOp, ScpEnvelope, StellarMessage, TransactionSet, TransactionV0, Uint64,
+    PaymentOp, ScpEnvelope, StellarMessage, TransactionSet, Uint64,
 };
 use substrate_stellar_sdk::TransactionEnvelope;
 use substrate_stellar_sdk::{Asset, SecretKey, Transaction};
@@ -349,6 +349,7 @@ mod collector {
     use super::*;
     use stellar_relay::helper::compute_non_generic_tx_set_content_hash;
     use substrate_stellar_sdk::types::{ScpStatementExternalize, ScpStatementPledges};
+    use substrate_stellar_sdk::Memo;
 
     pub struct ScpMessageCollector {
         /// holds the mapping of the Slot Number(key) and the ScpEnvelopes(value)
@@ -535,15 +536,34 @@ mod collector {
             set.txes.get_vec().iter().for_each(|tx_env| {
                 let tx_hash = tx_env.get_hash(&self.network);
 
-                match tx_env {
-                    TransactionEnvelope::EnvelopeTypeTxV0(_) => {}
-                    TransactionEnvelope::EnvelopeTypeTx(value) => {
-                        print_new_transaction(value.tx.clone())
+                fn check_memo(memo: &Memo) -> bool {
+                    // based on Marcel's comments:
+                    // but we could extend the memo filtering technique to only store
+                    // tx hashes for transactions that have a MEMO_TEXT of size 32byte
+                    // or a MEMO_HASH with a hash.
+                    match memo {
+                        Memo::MemoText(t) if t.len() <= 32 => true,
+                        Memo::MemoHash(_) => true,
+                        _ => false,
                     }
-                    TransactionEnvelope::EnvelopeTypeTxFeeBump(_) => {}
-                    TransactionEnvelope::Default(code) => log::info!("Default: {:?}", code),
                 }
-                self.tx_hash_map.insert(tx_hash, slot);
+
+                let is_save_tx = match tx_env {
+                    TransactionEnvelope::EnvelopeTypeTxV0(value) => check_memo(&value.tx.memo),
+                    TransactionEnvelope::EnvelopeTypeTx(value) => {
+                        print_new_transaction(value.tx.clone());
+                        check_memo(&value.tx.memo)
+                    }
+                    TransactionEnvelope::EnvelopeTypeTxFeeBump(_) => false,
+                    TransactionEnvelope::Default(code) => {
+                        log::info!("Default: {:?}", code);
+                        false
+                    }
+                };
+
+                if is_save_tx {
+                    self.tx_hash_map.insert(tx_hash, slot);
+                }
             });
         }
     }
@@ -556,7 +576,6 @@ mod collector {
 
 mod tx_handler {
     use super::*;
-    use substrate_stellar_sdk::types::TransactionV0Envelope;
     use substrate_stellar_sdk::XdrCodec;
 
     pub struct Proof {
@@ -651,10 +670,7 @@ use tx_handler::*;
 use types::*;
 
 use sp_keyring::AccountKeyring;
-use subxt::{
-    tx::{Era, PairSigner, PlainTip, PolkadotExtrinsicParamsBuilder as Params},
-    OnlineClient, PolkadotConfig,
-};
+use subxt::{tx::PairSigner, OnlineClient, PolkadotConfig};
 
 fn print_new_transaction(transaction: Transaction) {
     // log::info!("--- Processing new transaction ---");
@@ -772,8 +788,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     log::info!("---- PID: {} Handle {:?}----", p_id, msg_type);
                     collector.handle_tx_set(&set, &mut tx_set_hash_map)?;
                 }
-                StellarMessage::Transaction(env) => {
-                    //TODO: remove this part here, and replace it
+                StellarMessage::Transaction(_) => {
+                    //TODO: remove this part here, and replace it with an actual code.
                     counter += 1;
 
                     use rand::seq::{IteratorRandom, SliceRandom};
@@ -785,7 +801,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         log::info!("chose key: {:?}", random_key);
 
                         let slot = collector.tx_hash_map().get(random_key).unwrap();
-                        let envs = collector.envelopes_map().get(slot).unwrap();
                         let txset = collector.txset_map().get(slot).unwrap();
 
                         let tx_vec = txset.txes.get_vec();
