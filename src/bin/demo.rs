@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, HashMap};
 use stellar_relay::{connect, node::NodeInfo, ConnConfig, StellarNodeMessage, UserControls};
 use substrate_stellar_sdk::compound_types::UnlimitedVarArray;
-use substrate_stellar_sdk::network::Network;
+use substrate_stellar_sdk::network::{Network, PUBLIC_NETWORK, TEST_NETWORK};
 use substrate_stellar_sdk::types::{
     PaymentOp, ScpEnvelope, StellarMessage, TransactionSet, Uint64,
 };
@@ -118,6 +118,9 @@ mod constants {
 
     pub const VAULT_ADDRESSES_FILTER: &[&str] =
         &["GB4RUHO227TJJMYNETOCNI67UCIR2XRGQBUN4F6UJKRKLX6EK72Q7VJU"];
+
+    pub const TIER_1_VALIDATOR_IP_TESTNET: &str = "34.235.168.98";
+    pub const TIER_1_VALIDATOR_IP_PUBLIC: &str = "135.181.16.110";
 }
 
 mod traits {
@@ -385,6 +388,12 @@ mod collector {
 
         pub fn network(&self) -> &Network {
             &self.network
+        }
+
+        pub fn is_public(&self) -> bool {
+            self.network
+                .get_passphrase()
+                .eq(PUBLIC_NETWORK.get_passphrase())
         }
 
         /// handles incoming ScpEnvelope.
@@ -752,26 +761,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
     prepare_directories()?;
 
-    let api = OnlineClient::<PolkadotConfig>::new().await.unwrap();
+    let args: Vec<String> = std::env::args().collect();
+    let arg_network = &args[1];
+    let mut network: Network = Network::new(TEST_NETWORK.get_passphrase());
+    let mut tier1_node_ip = TIER_1_VALIDATOR_IP_TESTNET;
 
-    let network = Network::new(b"Test SDF Network ; September 2015");
+    if arg_network == "mainnet" {
+        network = Network::new(PUBLIC_NETWORK.get_passphrase());
+        tier1_node_ip = TIER_1_VALIDATOR_IP_PUBLIC;
+    }
+    log::info!(
+        "Connected to {:?} through {:?}",
+        std::str::from_utf8(network.get_passphrase().as_slice()).unwrap(),
+        tier1_node_ip
+    );
 
     let secret =
         SecretKey::from_encoding("SBLI7RKEJAEFGLZUBSCOFJHQBPFYIIPLBCKN7WVCWT4NEG2UJEW33N73")
             .unwrap();
 
     let node_info = NodeInfo::new(19, 21, 19, "v19.1.0".to_string(), &network);
-
-    let cfg = ConnConfig::new("34.235.168.98", 11625, secret, 0, true, true, false);
-
+    let cfg = ConnConfig::new(tier1_node_ip, 11625, secret, 0, true, true, false);
     let mut user: UserControls = connect(node_info, cfg).await?;
-
     let mut collector = ScpMessageCollector::new(network);
 
-    // just a temporary holder
     let mut tx_set_hash_map: TxSetCheckerMap = HashMap::new();
 
-    let mut counter = 0;
     while let Some(conn_state) = user.recv().await {
         match conn_state {
             StellarNodeMessage::Data {
