@@ -381,6 +381,8 @@ mod collector {
         txset_map: TxSetMap,
         /// holds the mapping of the Transaction Hash(key) and the Slot Number(value)
         tx_hash_map: TxHashMap,
+        /// Holds the transactions that still have to be processed but were not because not enough scp messages are available yet.
+        pending_transactions: Vec<TransactionEnvelope>,
         public_network: bool,
     }
 
@@ -390,6 +392,7 @@ mod collector {
                 envelopes_map: Default::default(),
                 txset_map: Default::default(),
                 tx_hash_map: Default::default(),
+                pending_transactions: vec![],
                 public_network,
             }
         }
@@ -568,7 +571,6 @@ mod collector {
             tx_set: &TransactionSet,
         ) -> Result<(), Error> {
             log::info!("slot: {} inserting transacion set", slot);
-            let mut txs_to_validate: Vec<TransactionEnvelope> = Vec::new();
 
             // Collect tx hashes to build proofs, and transactions to validate
             tx_set.txes.get_vec().iter().for_each(|tx_env| {
@@ -593,7 +595,10 @@ mod collector {
                     TransactionEnvelope::EnvelopeTypeTxV0(value) => check_memo(&value.tx.memo),
                     TransactionEnvelope::EnvelopeTypeTx(value) => {
                         if is_tx_relevant(&value.tx) {
-                            txs_to_validate.push(tx_env.clone());
+                            // Add transaction to pending transactions if it is not yet contained
+                            if self.pending_transactions.iter().find(|tx| tx.get_hash(self.network()) == tx_hash).is_none() {
+                                self.pending_transactions.push(tx_env.clone());
+                            }
                         }
                         check_memo(&value.tx.memo)
                     }
@@ -608,9 +613,19 @@ mod collector {
                     self.tx_hash_map.insert(tx_hash, slot);
                 }
             });
-            // Send validation proofs
-            for tx_env in txs_to_validate.iter() {
-                tx_handler::handle_tx(tx_env.clone(), self).await?;
+
+            // Store the handled transaction indices in a vec to be able to remove them later
+            let mut handled_tx_indices = Vec::new();
+            for (index, tx_env) in self.pending_transactions.iter().enumerate() {
+                // Try to send validation proofs
+                let handled = tx_handler::handle_tx(tx_env.clone(), self).await?;
+                if handled {
+                    handled_tx_indices.push(index);
+                }
+            }
+            // Remove the handled transactions from the pending transactions
+            for index in handled_tx_indices.iter().rev() {
+                self.pending_transactions.remove(*index);
             }
             Ok(())
         }
@@ -633,13 +648,19 @@ mod tx_handler {
         tx_set: TransactionSet,
     }
 
+    // Returns a bool indicating whether the transaction was successfully handled or not
     pub async fn handle_tx(
         tx_env: TransactionEnvelope,
         collector: &ScpMessageCollector,
-    ) -> Result<(), Error> {
+    ) -> Result<bool, Error> {
         let api = OnlineClient::<PolkadotConfig>::new().await.unwrap();
 
         if let Some((envelopes, txset)) = build_proof(&tx_env, collector) {
+            if envelopes.len() < 20 {
+                log::info!("Not yet enough envelopes to build proof, current amount {:?}. Retrying in next loop...", envelopes.len());
+                return Ok(false);
+            }
+            log::info!("Sending proof for tx: {:?} with {:?} scp messages", tx_env.get_hash(collector.network()), envelopes.len());
             let (tx_env, envelopes, txset) = encode(tx_env, envelopes, txset);
             let tx = spacewalk_chain::tx()
                 .stellar_relay()
@@ -654,7 +675,7 @@ mod tx_handler {
             log::info!("extrinsic submitted: {:?}", hash);
         }
 
-        Ok(())
+        Ok(true)
     }
 
     fn encode(
