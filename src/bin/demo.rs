@@ -542,12 +542,15 @@ mod collector {
                     // tx hashes for transactions that have a MEMO_TEXT of size 32byte
                     // or a MEMO_HASH with a hash.
                     match memo {
-                        Memo::MemoText(t) if t.len() > 0 && t.len() <= 32 => {
-                            std::str::from_utf8(t.get_vec())
-                                .and_then(|memo_text| Ok(memo_text.contains("demo")))
-                                .unwrap_or(false)
-                        }
-                        Memo::MemoHash(_) => true,
+                        Memo::MemoText(t) if t.len() > 0 => std::str::from_utf8(t.get_vec())
+                            .and_then(|memo_text| Ok(memo_text.contains("demo")))
+                            .unwrap_or(false),
+                        // note/todo: After the demo we should actually consider keeping only
+                        // hashes for transactions that have a MEMO_HASH and not even MEMO_TEXT),
+                        // because according to the Stellar docs,
+                        // MEMO_TEXT can only be 28-bytes long which would not be enough
+                        // to store the identifier we need for spacewalk.
+                        // Thus only transactions with MEMO_HASH will be interesting for spacewalk.
                         _ => false,
                     }
                 }
