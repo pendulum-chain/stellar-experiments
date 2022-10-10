@@ -455,7 +455,7 @@ mod collector {
                 // insert/add messages
                 match self.envelopes_map.get_mut(&slot) {
                     None => {
-                        log::info!("slot: {} add to envelopes map", slot);
+                        log::info!("Adding received SCP envelopes for slot {}", slot);
 
                         self.envelopes_map.insert(slot, vec![env]);
                     }
@@ -570,7 +570,8 @@ mod collector {
             slot: Slot,
             tx_set: &TransactionSet,
         ) -> Result<(), Error> {
-            log::info!("slot: {} inserting transacion set", slot);
+            log::info!("Inserting received transaction set for slot {}", slot);
+
 
             // Collect tx hashes to build proofs, and transactions to validate
             tx_set.txes.get_vec().iter().for_each(|tx_env| {
@@ -656,9 +657,16 @@ mod tx_handler {
         let api = OnlineClient::<PolkadotConfig>::new().await.unwrap();
 
         if let Some((envelopes, txset)) = build_proof(&tx_env, collector) {
-            if envelopes.len() < 20 {
-                log::info!("Not yet enough envelopes to build proof, current amount {:?}. Retrying in next loop...", envelopes.len());
-                return Ok(false);
+            if collector.is_public() {
+                if envelopes.len() < 20 {
+                    log::info!("Not yet enough envelopes to build proof, current amount {:?}. Retrying in next loop...", envelopes.len());
+                    return Ok(false);
+                }
+            } else {
+                if envelopes.len() < 2 {
+                    log::info!("Not yet enough envelopes to build proof, current amount {:?}. Retrying in next loop...", envelopes.len());
+                    return Ok(false);
+                }
             }
             log::info!("Sending proof for tx: {:?} with {:?} scp messages", tx_env.get_hash(collector.network()), envelopes.len());
             let (tx_env, envelopes, txset) = encode(tx_env, envelopes, txset);
@@ -672,7 +680,7 @@ mod tx_handler {
                 );
             let signer = PairSigner::new(AccountKeyring::Alice.pair());
             let hash = api.tx().sign_and_submit_default(&tx, &signer).await?;
-            log::info!("extrinsic submitted: {:?}", hash);
+            log::info!("Successfully submitted validate_stellar_transaction_ext() extrinsic: {:?}", hash);
         }
 
         Ok(true)
@@ -756,8 +764,8 @@ fn is_tx_relevant(transaction: &Transaction) -> bool {
             let destination = payment_op.destination.clone();
             let amount = payment_op.amount;
             let asset = payment_op.asset.clone();
-            log::info!("Deposit amount {:?}", amount);
-            print_asset(asset);
+            log::info!("Deposit amount {:?} stroops", amount);
+            // print_asset(asset);
             log::info!(
                 "From {:#?}",
                 std::str::from_utf8(source.to_encoding().as_slice()).unwrap()
@@ -841,8 +849,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     while let Some(conn_state) = user.recv().await {
         match conn_state {
             StellarNodeMessage::Data {
-                p_id,
-                msg_type,
+                p_id: _,
+                msg_type: _,
                 msg,
             } => match msg {
                 StellarMessage::ScpMessage(env) => {
@@ -851,7 +859,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .await?;
                 }
                 StellarMessage::TxSet(set) => {
-                    log::info!("---- PID: {} Handle {:?}----", p_id, msg_type);
+                    // log::info!("---- PID: {} Handle {:?}----", p_id, msg_type);
                     collector.handle_tx_set(&set, &mut tx_set_hash_map).await?;
                 }
                 _ => {}
