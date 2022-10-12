@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 use std::collections::{BTreeMap, HashMap};
+use std::time::Duration;
 use std::vec;
 
 use sp_keyring::AccountKeyring;
@@ -12,12 +13,14 @@ use substrate_stellar_sdk::types::{
     PaymentOp, ScpEnvelope, StellarMessage, TransactionSet, Uint64,
 };
 use subxt::{OnlineClient, PolkadotConfig, tx::PairSigner};
+use tokio::time::error::Elapsed;
+use tokio::time::timeout;
 
 use collector::*;
 use constants::*;
 use error::Error;
 use handler::*;
-use stellar_relay::{ConnConfig, connect, node::NodeInfo, StellarNodeMessage, UserControls};
+use stellar_relay::{ConnConfig, node::NodeInfo, StellarNodeMessage, UserControls};
 use traits::*;
 use types::*;
 
@@ -841,32 +844,60 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let node_info = NodeInfo::new(19, 21, 19, "v19.1.0".to_string(), network);
     let cfg = ConnConfig::new(tier1_node_ip, 11625, secret, 0, true, true, false);
-    let mut user: UserControls = connect(node_info, cfg).await?;
     let mut collector = ScpMessageCollector::new(public_network);
-
     let mut tx_set_hash_map: TxSetCheckerMap = HashMap::new();
 
-    while let Some(conn_state) = user.recv().await {
-        match conn_state {
-            StellarNodeMessage::Data {
-                p_id: _,
-                msg_type: _,
-                msg,
-            } => match msg {
-                StellarMessage::ScpMessage(env) => {
-                    collector
-                        .handle_envelope(env, &mut tx_set_hash_map, &user)
-                        .await?;
-                }
-                StellarMessage::TxSet(set) => {
-                    // log::info!("---- PID: {} Handle {:?}----", p_id, msg_type);
-                    collector.handle_tx_set(&set, &mut tx_set_hash_map).await?;
-                }
-                _ => {}
-            },
+    let mut retries = 0;
 
-            _ => {}
+    while retries < 3 {
+        log::info!("RETRY {}",retries);
+        match timeout(
+            Duration::from_secs(cfg.timeout_in_secs),
+            UserControls::connect(node_info.clone(), cfg.clone())
+        ).await {
+            Ok(Ok(mut user)) => {
+                while let Some(conn_state) = user.recv().await {
+                    match conn_state {
+                        StellarNodeMessage::Data {
+                            p_id: _,
+                            msg_type: _,
+                            msg,
+                        } => match msg {
+                            StellarMessage::ScpMessage(env) => {
+                                collector
+                                    .handle_envelope(env, &mut tx_set_hash_map, &user)
+                                    .await?;
+                            }
+                            StellarMessage::TxSet(set) => {
+                                // log::info!("---- PID: {} Handle {:?}----", p_id, msg_type);
+                                collector.handle_tx_set(&set, &mut tx_set_hash_map).await?;
+                            }
+                            _ => {}
+                        },
+
+                        StellarNodeMessage::Timeout => {
+                            log::error!("timed out.");
+                        }
+
+                        StellarNodeMessage::Error(e) => {
+                            log::error!("Stellar Node Error: {:?}",e);
+                        }
+
+                        _ => {}
+                    }
+                }
+            }
+            Ok(Err(e)) => {
+                log::error!("{:?}",e);
+            }
+            Err(e) => {
+                log::error!("During connecting: {:?}",e.to_string());
+            }
         }
+
+
+        retries+=1;
+
     }
     Ok(())
 }

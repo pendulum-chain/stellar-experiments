@@ -8,6 +8,7 @@ use substrate_stellar_sdk::types::{
 };
 use substrate_stellar_sdk::XdrCodec;
 use tokio::sync::mpsc;
+use tokio::time;
 
 use crate::node::{LocalInfo, NodeInfo, RemoteInfo};
 
@@ -18,6 +19,7 @@ pub struct Connector {
     hmac_keys: Option<HMacKeys>,
 
     pub(crate) connection_auth: ConnectionAuth,
+    pub(crate) timeout_in_secs: u64,
 
     remote_called_us: bool,
     receive_tx_messages: bool,
@@ -104,6 +106,7 @@ impl Connector {
             remote: None,
             hmac_keys: None,
             connection_auth,
+            timeout_in_secs: cfg.timeout_in_secs,
             remote_called_us: cfg.remote_called_us,
             receive_tx_messages: cfg.recv_scp_messages,
             receive_scp_messages: cfg.recv_scp_messages,

@@ -41,6 +41,7 @@ pub enum StellarNodeMessage {
 }
 
 /// Config for connecting to Stellar Node
+#[derive(Clone)]
 pub struct ConnConfig {
     address: String,
     port: u32,
@@ -49,6 +50,8 @@ pub struct ConnConfig {
     pub recv_tx_msgs: bool,
     pub recv_scp_messages: bool,
     pub remote_called_us: bool,
+    pub timeout_in_secs: u64,
+    pub retries:u8
 }
 
 impl ConnConfig {
@@ -61,6 +64,30 @@ impl ConnConfig {
         recv_scp_messages: bool,
         remote_called_us: bool,
     ) -> ConnConfig {
+        Self::new_with_timeout(
+            addr,
+            port,
+            secret_key,
+            auth_cert_expiration,
+            recv_tx_msgs,
+            recv_scp_messages,
+            remote_called_us,
+            30,
+            3
+        )
+    }
+
+    pub fn new_with_timeout(
+        addr: &str,
+        port: u32,
+        secret_key: SecretKey,
+        auth_cert_expiration: u64,
+        recv_tx_msgs: bool,
+        recv_scp_messages: bool,
+        remote_called_us: bool,
+        timeout_in_secs: u64,
+        retries:u8
+    ) -> ConnConfig {
         ConnConfig {
             address: addr.to_owned(),
             port,
@@ -69,6 +96,8 @@ impl ConnConfig {
             recv_tx_msgs,
             recv_scp_messages,
             remote_called_us,
+            timeout_in_secs,
+            retries
         }
     }
 

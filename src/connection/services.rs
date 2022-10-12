@@ -1,3 +1,4 @@
+use std::time::Duration;
 use crate::connection::connector::{Connector, ConnectorActions};
 use crate::connection::helper::time_now;
 use crate::connection::xdr_converter::get_xdr_message_length;
@@ -7,8 +8,10 @@ use crate::{ConnConfig, StellarNodeMessage, UserControls};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{tcp, TcpStream};
 use tokio::sync::mpsc;
+use tokio::time::error::Elapsed;
+use tokio::time::Timeout;
 
-async fn create_stream(
+pub(crate) async fn create_stream(
     address: &str,
 ) -> Result<(tcp::OwnedReadHalf, tcp::OwnedWriteHalf), ConnectionError> {
     let stream = TcpStream::connect(address)
@@ -146,7 +149,7 @@ async fn read_message(
 /// # Arguments
 /// * `r_stream` - the read stream for reading the xdr stellar message
 /// * `tx_stream_reader` - the sender for handling the xdr stellar message
-async fn receiving_service(
+pub(crate) async fn receiving_service(
     mut r_stream: tcp::OwnedReadHalf,
     tx_stream_reader: mpsc::Sender<ConnectorActions>,
 ) -> Result<(), ConnectionError> {
@@ -202,9 +205,45 @@ async fn receiving_service(
                 .await?;
             }
 
-            Err(_) => {}
+            Err(e) => {
+                log::info!("ERROR ERROR! {:?}",e);
+            }
         }
     }
+}
+
+async fn _connection_handler(actions:ConnectorActions,
+                             conn:&mut Connector,
+                             receiver:&mut mpsc::Receiver<ConnectorActions>,
+                             w_stream:&mut tcp::OwnedWriteHalf
+) -> Result<(), ConnectionError> {
+    match actions {
+        // start the connection to Stellar node with a 'hello'
+        ConnectorActions::SendHello => {
+            log::info!("Starting Handshake with Hello.");
+            let msg = conn.create_hello_message(time_now())?;
+            w_stream
+                .write_all(&msg)
+                .await
+                .map_err(|e| ConnectionError::WriteFailed(e.to_string()))?;
+        }
+
+        // write message to the stream
+        ConnectorActions::SendMessage(msg) => {
+            let xdr_msg = conn.create_xdr_message(msg)?;
+            w_stream
+                .write_all(&xdr_msg)
+                .await
+                .map_err(|e| ConnectionError::WriteFailed(e.to_string()))?;
+        }
+
+        // handle incoming message from the stream
+        ConnectorActions::HandleMessage(xdr) => {
+            conn.process_raw_message(xdr).await?;
+        }
+    }
+
+    Ok(())
 }
 
 /// Handles actions for the connection.
@@ -212,68 +251,27 @@ async fn receiving_service(
 /// * `conn` - the Connector that would send/handle messages to/from Stellar Node
 /// * `receiver` - The receiver for actions that the Connector should do.
 /// * `w_stream` -> the write half of the TcpStream to connect to the Stellar Node
-async fn connection_handler(
+pub(crate) async fn connection_handler(
     mut conn: Connector,
     mut receiver: mpsc::Receiver<ConnectorActions>,
     mut w_stream: tcp::OwnedWriteHalf,
 ) -> Result<(), ConnectionError> {
     loop {
-        match receiver.recv().await {
-            // write message to the stream
-            Some(ConnectorActions::SendMessage(msg)) => {
-                let xdr_msg = conn.create_xdr_message(msg)?;
-                w_stream
-                    .write_all(&xdr_msg)
-                    .await
-                    .map_err(|e| ConnectionError::WriteFailed(e.to_string()))?;
+        match tokio::time::timeout(
+            Duration::from_secs(conn.timeout_in_secs),
+            receiver.recv()
+        ).await {
+            Ok(Some(action)) => {
+                _connection_handler(action,&mut conn,&mut receiver,&mut w_stream).await?;
             }
+            Ok(None) => {}
+            Err(elapsed) => {
+                log::error!("connection handler timed out! elapsed time: {:?}", elapsed.to_string());
+                conn.send_to_user(StellarNodeMessage::Timeout).await?;
+                return Err(ConnectionError::ConnectionFailed(format!("TIMED OUT! elapsed time: {:?}", elapsed.to_string())));
 
-            // handle incoming message from the stream
-            Some(ConnectorActions::HandleMessage(xdr)) => {
-                conn.process_raw_message(xdr).await?;
             }
-
-            // start the connection to Stellar node with a 'hello'
-            Some(ConnectorActions::SendHello) => {
-                log::info!("Starting Handshake with Hello.");
-                let msg = conn.create_hello_message(time_now())?;
-                w_stream
-                    .write_all(&msg)
-                    .await
-                    .map_err(|e| ConnectionError::WriteFailed(e.to_string()))?;
-            }
-
-            None => {}
         }
+
     }
-}
-
-/// Triggers connection to the Stellar Node.
-/// Returns the UserControls for the user to send and receive Stellar messages.
-pub async fn connect(
-    local_node: NodeInfo,
-    cfg: ConnConfig,
-) -> Result<UserControls, ConnectionError> {
-    // split the stream for easy handling of read and write
-    let (rd, wr) = create_stream(&cfg.address()).await?;
-
-    // ------------------ prepare the channels
-
-    // this is a channel to communicate with the connection/config (this needs renaming)
-    let (actions_sender, actions_receiver) = mpsc::channel::<ConnectorActions>(1024);
-    // this is a chanel to communicate with the user/caller.
-    let (message_writer, message_receiver) = mpsc::channel::<StellarNodeMessage>(1024);
-
-    let conn = Connector::new(local_node, cfg, actions_sender.clone(), message_writer);
-
-    // start the receiving_service
-    tokio::spawn(receiving_service(rd, actions_sender.clone()));
-
-    // run the conn communication
-    tokio::spawn(connection_handler(conn, actions_receiver, wr));
-
-    // start the handshake
-    actions_sender.send(ConnectorActions::SendHello).await?;
-
-    Ok(UserControls::new(actions_sender, message_receiver))
 }
