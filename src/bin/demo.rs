@@ -889,7 +889,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             Ok(Err(e)) => {
-                retries=0;
                 log::error!("{:?}",e);
             }
             Err(e) => {

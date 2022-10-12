@@ -266,11 +266,9 @@ pub(crate) async fn connection_handler(
                 retry = 0;
                 _connection_handler(action,&mut conn,&mut receiver,&mut w_stream).await?;
             }
-            Ok(None) => {
-                retry = 0;
-            }
+            Ok(None) => {}
             Err(elapsed) => {
-                log::error!("connection handler timed out! elapsed time: {:?} retry: {}", elapsed.to_string(), retry);
+                log::error!("{} for receiving messages. Retry: {}", elapsed.to_string(), retry);
                 if retry >= conn.retries {
                     conn.send_to_user(StellarNodeMessage::Timeout).await?;
                     return Err(ConnectionError::ConnectionFailed(format!("TIMED OUT! elapsed time: {:?}", elapsed.to_string())));
