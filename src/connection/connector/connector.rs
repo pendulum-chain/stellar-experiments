@@ -20,6 +20,7 @@ pub struct Connector {
 
     pub(crate) connection_auth: ConnectionAuth,
     pub(crate) timeout_in_secs: u64,
+    pub(crate) retries:u8,
 
     remote_called_us: bool,
     receive_tx_messages: bool,
@@ -107,6 +108,7 @@ impl Connector {
             hmac_keys: None,
             connection_auth,
             timeout_in_secs: cfg.timeout_in_secs,
+            retries: cfg.retries,
             remote_called_us: cfg.remote_called_us,
             receive_tx_messages: cfg.recv_scp_messages,
             receive_scp_messages: cfg.recv_scp_messages,

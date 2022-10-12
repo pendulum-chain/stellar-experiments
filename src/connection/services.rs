@@ -256,6 +256,7 @@ pub(crate) async fn connection_handler(
     mut receiver: mpsc::Receiver<ConnectorActions>,
     mut w_stream: tcp::OwnedWriteHalf,
 ) -> Result<(), ConnectionError> {
+    let mut retry = 0;
     loop {
         match tokio::time::timeout(
             Duration::from_secs(conn.timeout_in_secs),
@@ -266,12 +267,13 @@ pub(crate) async fn connection_handler(
             }
             Ok(None) => {}
             Err(elapsed) => {
-                log::error!("connection handler timed out! elapsed time: {:?}", elapsed.to_string());
-                conn.send_to_user(StellarNodeMessage::Timeout).await?;
-                return Err(ConnectionError::ConnectionFailed(format!("TIMED OUT! elapsed time: {:?}", elapsed.to_string())));
-
+                log::error!("connection handler timed out! elapsed time: {:?} retry: {}", elapsed.to_string(), retry);
+                if retry >= conn.retries {
+                    conn.send_to_user(StellarNodeMessage::Timeout).await?;
+                    return Err(ConnectionError::ConnectionFailed(format!("TIMED OUT! elapsed time: {:?}", elapsed.to_string())));
+                }
+                retry+=1;
             }
         }
-
     }
 }

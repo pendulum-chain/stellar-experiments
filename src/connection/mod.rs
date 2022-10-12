@@ -72,7 +72,7 @@ impl ConnConfig {
             recv_tx_msgs,
             recv_scp_messages,
             remote_called_us,
-            30,
+            10,
             3
         )
     }
