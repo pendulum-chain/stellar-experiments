@@ -856,7 +856,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             UserControls::connect(node_info.clone(), cfg.clone())
         ).await {
             Ok(Ok(mut user)) => {
-                retries=0;
                 while let Some(conn_state) = user.recv().await {
                     match conn_state {
                         StellarNodeMessage::Data {
