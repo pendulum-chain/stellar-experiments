@@ -893,11 +893,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         retries+=1;
                         log::error!("Connection Failed: {:?}. Retry: {}",e_str, retries);
                     }
-                    _ => {
+                    other => {
+                        log::error!("{:?}",other);
                         retries = cfg.retries;
                     }
                 }
-                log::error!("{:?}",e);
             }
             Err(e) => {
                 retries+=1;
