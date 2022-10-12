@@ -263,9 +263,12 @@ pub(crate) async fn connection_handler(
             receiver.recv()
         ).await {
             Ok(Some(action)) => {
+                retry = 0;
                 _connection_handler(action,&mut conn,&mut receiver,&mut w_stream).await?;
             }
-            Ok(None) => {}
+            Ok(None) => {
+                retry = 0;
+            }
             Err(elapsed) => {
                 log::error!("connection handler timed out! elapsed time: {:?} retry: {}", elapsed.to_string(), retry);
                 if retry >= conn.retries {

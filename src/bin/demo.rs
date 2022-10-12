@@ -849,13 +849,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut retries = 0;
 
-    while retries < 3 {
+    while retries < cfg.retries {
         log::info!("RETRY {}",retries);
         match timeout(
             Duration::from_secs(cfg.timeout_in_secs),
             UserControls::connect(node_info.clone(), cfg.clone())
         ).await {
             Ok(Ok(mut user)) => {
+                retries=0;
                 while let Some(conn_state) = user.recv().await {
                     match conn_state {
                         StellarNodeMessage::Data {
@@ -888,15 +889,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             Ok(Err(e)) => {
+                retries=0;
                 log::error!("{:?}",e);
             }
             Err(e) => {
+                retries+=1;
                 log::error!("During connecting: {:?}",e.to_string());
             }
         }
-
-
-        retries+=1;
 
     }
     Ok(())
