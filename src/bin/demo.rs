@@ -20,7 +20,7 @@ use collector::*;
 use constants::*;
 use error::Error;
 use handler::*;
-use stellar_relay::{ConnConfig, node::NodeInfo, StellarNodeMessage, UserControls};
+use stellar_relay::{ConnConfig, ConnectionError, node::NodeInfo, StellarNodeMessage, UserControls};
 use traits::*;
 use types::*;
 
@@ -850,12 +850,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut retries = 0;
 
     while retries < cfg.retries {
-        log::info!("RETRY {}",retries);
         match timeout(
             Duration::from_secs(cfg.timeout_in_secs),
             UserControls::connect(node_info.clone(), cfg.clone())
         ).await {
             Ok(Ok(mut user)) => {
+                retries = 0;
                 while let Some(conn_state) = user.recv().await {
                     match conn_state {
                         StellarNodeMessage::Data {
@@ -888,6 +888,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             Ok(Err(e)) => {
+                match e {
+                    ConnectionError::ConnectionFailed(e_str) => {
+                        retries+=1;
+                        log::error!("Connection Failed: {:?}. Retry: {}",e_str, retries);
+                    }
+                    _ => {
+                        retries = cfg.retries;
+                    }
+                }
                 log::error!("{:?}",e);
             }
             Err(e) => {
