@@ -136,7 +136,7 @@ mod constants {
         &["GAP4SFKVFVKENJ7B7VORAYKPB3CJIAJ2LMKDJ22ZFHIAIVYQOR6W3CXF"];
 
     pub const TIER_1_VALIDATOR_IP_TESTNET: &str = "34.235.168.98";
-    pub const TIER_1_VALIDATOR_IP_PUBLIC: &str = "135.181.16.110";
+    pub const TIER_1_VALIDATOR_IP_PUBLIC: &str = "45.55.99.75";
 }
 
 mod traits {
