@@ -89,7 +89,7 @@ The `ScpMessageCollector` is another structure to hold mappings between the slot
 
 To run the demo.rs, execute
 ```
- RUST_LOG=info cargo run --example mainnet
+ RUST_LOG=info cargo run mainnet
 ```
 and you should be able to see in the terminal:
 ```
