@@ -43,7 +43,7 @@ The `UserControls` is used to connect to the StellarNode. The function `connect(
 * `ConnConfig`
 ```rust
 let user = UserControls::connect(node_info, conn_cfg);
-* ```
+```
 The `UserControls` is also used to listen and send messages to the Stellar Node. 
 * `send(StellarMessage)` - an async method to send `StellarMessage` to the StellarNode
 * `recv()` - an async method which receives a `StellarNodeMessage`. The `StellarNodeMessage` is an enum of 4 variants:
@@ -71,7 +71,6 @@ The `UserControls` is also used to listen and send messages to the Stellar Node.
 * `Timeout` -> a todo
 * `Error` -> a todo
 
-
 ### Collecting Messages
 The `ScpMessageCollector` is another structure to hold mappings between the slots, transactions, transactionsets, and their hashes.
 ```rust
@@ -88,8 +87,9 @@ The `ScpMessageCollector` is another structure to hold mappings between the slot
     }
 ```
 
+To run the demo.rs, execute
 ```
- RUST_LOG=info cargo run --example connect
+ RUST_LOG=info cargo run --example mainnet
 ```
 and you should be able to see in the terminal:
 ```
@@ -125,3 +125,4 @@ Here is an example in the terminal when disconnection/reconnection happens:
 [2022-11-14T18:10:59Z INFO  demo::collector] Adding received SCP envelopes for slot 43568082
 [2022-11-14T18:10:59Z INFO  demo::collector] Inserting received transaction set for slot 43568082
 ```
+^ The demo is based on  `public` validator: 45.55.99.75
