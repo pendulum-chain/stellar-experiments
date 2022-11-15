@@ -1,7 +1,8 @@
 # Stellar Experiments
 
-A rust implementation of the [js-stellar-node-connector](https://github.com/stellarbeat/js-stellar-node-connector).
+This project contains the code to run a basic oracle agent. It was developed in this repository first because the other spacewalk components are not necessarily needed to show how the Stellar oracle pallet and agent work and communicate. The code of this repository now lives in the [stellar-relay](https://github.com/pendulum-chain/spacewalk/tree/main/clients/stellar-relay) directory in Spacewalk and future changes to the agent code will happen there.
 
+_Stellar Experiments_ is a rust implementation of the [js-stellar-node-connector](https://github.com/stellarbeat/js-stellar-node-connector).
 This acts as a mediator between the user(you) and the Stellar Node.
 
 ## Usage
