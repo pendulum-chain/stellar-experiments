@@ -1,11 +1,41 @@
 [package]
+edition = "2021"
 name = "stellar-relay"
 version = "0.1.0"
-edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[dependencies]
-substrate-stellar-sdk = {git = "https://github.com/pendulum-chain/substrate-stellar-sdk", branch = "master", default-features = false, features = ['all-types']}
-# substrate-stellar-sdk = {path = "../substrate-stellar-sdk", default-features = false, features = ['all-types']}
+[lib]
+name = "stellar_relay"
+path = "src/lib.rs"
 
+[[bin]]
+name = "demo"
+path = "src/bin/demo.rs"
+
+[dependencies]
+env_logger = "0.9.0"
+log = "0.4.17"
+
+base64 = "0.13.0"
+rand = "0.8.5"
+thiserror = "1.0"
+tweetnacl = "0.4.0"
+
+hmac = "0.12.1"
+sha2 = "0.10.2"
+
+bincode = "1.3.3"
+serde = {version = "1.0.130", features = ["derive"]}
+serde_json = {version = '1.0.45'}
+
+substrate-stellar-sdk = {git = "https://github.com/pendulum-chain/substrate-stellar-sdk", branch = "master", default-features = false, features = ['all-types']}
+subxt = "0.24.0"
+sp-keyring = "6.0.0"
+parity-scale-codec = "3.2.1"
+
+err-derive = "0.3.1"
+tokio = {version = "1.0", features = ["full"]}
+
+[features]
+default = []
