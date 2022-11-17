@@ -5,14 +5,14 @@ use std::time::Duration;
 use std::vec;
 
 use sp_keyring::AccountKeyring;
-use substrate_stellar_sdk::{Asset, SecretKey, Transaction};
 use substrate_stellar_sdk::compound_types::UnlimitedVarArray;
 use substrate_stellar_sdk::network::{Network, PUBLIC_NETWORK, TEST_NETWORK};
-use substrate_stellar_sdk::TransactionEnvelope;
 use substrate_stellar_sdk::types::{
     PaymentOp, ScpEnvelope, StellarMessage, TransactionSet, Uint64,
 };
-use subxt::{OnlineClient, PolkadotConfig, tx::PairSigner};
+use substrate_stellar_sdk::TransactionEnvelope;
+use substrate_stellar_sdk::{Asset, SecretKey, Transaction};
+use subxt::{tx::PairSigner, OnlineClient, PolkadotConfig};
 use tokio::time::error::Elapsed;
 use tokio::time::timeout;
 
@@ -20,7 +20,9 @@ use collector::*;
 use constants::*;
 use error::Error;
 use handler::*;
-use stellar_relay::{ConnConfig, ConnectionError, node::NodeInfo, StellarNodeMessage, UserControls};
+use stellar_relay::{
+    node::NodeInfo, ConnConfig, ConnectionError, StellarNodeMessage, UserControls,
+};
 use traits::*;
 use types::*;
 
@@ -370,8 +372,8 @@ mod handler {
 }
 
 mod collector {
-    use substrate_stellar_sdk::Memo;
     use substrate_stellar_sdk::types::{ScpStatementExternalize, ScpStatementPledges};
+    use substrate_stellar_sdk::Memo;
 
     use stellar_relay::helper::compute_non_generic_tx_set_content_hash;
 
@@ -575,7 +577,6 @@ mod collector {
         ) -> Result<(), Error> {
             log::info!("Inserting received transaction set for slot {}", slot);
 
-
             // Collect tx hashes to build proofs, and transactions to validate
             tx_set.txes.get_vec().iter().for_each(|tx_env| {
                 let tx_hash = tx_env.get_hash(self.network());
@@ -600,7 +601,12 @@ mod collector {
                     TransactionEnvelope::EnvelopeTypeTx(value) => {
                         if is_tx_relevant(&value.tx) {
                             // Add transaction to pending transactions if it is not yet contained
-                            if self.pending_transactions.iter().find(|tx| tx.get_hash(self.network()) == tx_hash).is_none() {
+                            if self
+                                .pending_transactions
+                                .iter()
+                                .find(|tx| tx.get_hash(self.network()) == tx_hash)
+                                .is_none()
+                            {
                                 self.pending_transactions.push(tx_env.clone());
                             }
                         }
@@ -671,7 +677,11 @@ mod tx_handler {
                     return Ok(false);
                 }
             }
-            log::info!("Sending proof for tx: {:?} with {:?} scp messages", tx_env.get_hash(collector.network()), envelopes.len());
+            log::info!(
+                "Sending proof for tx: {:?} with {:?} scp messages",
+                tx_env.get_hash(collector.network()),
+                envelopes.len()
+            );
             let (tx_env, envelopes, txset) = encode(tx_env, envelopes, txset);
             let tx = spacewalk_chain::tx()
                 .stellar_relay()
@@ -683,7 +693,10 @@ mod tx_handler {
                 );
             let signer = PairSigner::new(AccountKeyring::Alice.pair());
             let hash = api.tx().sign_and_submit_default(&tx, &signer).await?;
-            log::info!("Successfully submitted validate_stellar_transaction_ext() extrinsic: {:?}", hash);
+            log::info!(
+                "Successfully submitted validate_stellar_transaction_ext() extrinsic: {:?}",
+                hash
+            );
         }
 
         Ok(true)
@@ -852,8 +865,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     while retries < cfg.retries {
         match timeout(
             Duration::from_secs(cfg.timeout_in_secs),
-            UserControls::connect(node_info.clone(), cfg.clone())
-        ).await {
+            UserControls::connect(node_info.clone(), cfg.clone()),
+        )
+        .await
+        {
             Ok(Ok(mut user)) => {
                 retries = 0;
                 while let Some(conn_state) = user.recv().await {
@@ -880,31 +895,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
 
                         StellarNodeMessage::Error(e) => {
-                            log::error!("Stellar Node Error: {:?}",e);
+                            log::error!("Stellar Node Error: {:?}", e);
                         }
 
                         _ => {}
                     }
                 }
             }
-            Ok(Err(e)) => {
-                match e {
-                    ConnectionError::ConnectionFailed(e_str) => {
-                        retries+=1;
-                        log::error!("Connection Failed: {:?}. Retry: {}",e_str, retries);
-                    }
-                    other => {
-                        log::error!("{:?}",other);
-                        retries = cfg.retries;
-                    }
+            Ok(Err(e)) => match e {
+                ConnectionError::ConnectionFailed(e_str) => {
+                    retries += 1;
+                    log::error!("Connection Failed: {:?}. Retry: {}", e_str, retries);
                 }
-            }
+                other => {
+                    log::error!("{:?}", other);
+                    retries = cfg.retries;
+                }
+            },
             Err(e) => {
-                retries+=1;
-                log::error!("During connecting: {:?}",e.to_string());
+                retries += 1;
+                log::error!("During connecting: {:?}", e.to_string());
             }
         }
-
     }
     Ok(())
 }

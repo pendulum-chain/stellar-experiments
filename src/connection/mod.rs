@@ -51,7 +51,7 @@ pub struct ConnConfig {
     pub recv_scp_messages: bool,
     pub remote_called_us: bool,
     pub timeout_in_secs: u64,
-    pub retries:u8
+    pub retries: u8,
 }
 
 impl ConnConfig {
@@ -73,7 +73,7 @@ impl ConnConfig {
             recv_scp_messages,
             remote_called_us,
             10,
-            3
+            3,
         )
     }
 
@@ -86,7 +86,7 @@ impl ConnConfig {
         recv_scp_messages: bool,
         remote_called_us: bool,
         timeout_in_secs: u64,
-        retries:u8
+        retries: u8,
     ) -> ConnConfig {
         ConnConfig {
             address: addr.to_owned(),
@@ -97,7 +97,7 @@ impl ConnConfig {
             recv_scp_messages,
             remote_called_us,
             timeout_in_secs,
-            retries
+            retries,
         }
     }
 

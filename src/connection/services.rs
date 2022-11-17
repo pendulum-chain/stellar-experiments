@@ -1,10 +1,10 @@
-use std::time::Duration;
 use crate::connection::connector::{Connector, ConnectorActions};
 use crate::connection::helper::time_now;
 use crate::connection::xdr_converter::get_xdr_message_length;
 use crate::node::NodeInfo;
 use crate::ConnectionError;
 use crate::{ConnConfig, StellarNodeMessage, UserControls};
+use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{tcp, TcpStream};
 use tokio::sync::mpsc;
@@ -206,16 +206,17 @@ pub(crate) async fn receiving_service(
             }
 
             Err(e) => {
-                log::info!("ERROR ERROR! {:?}",e);
+                log::info!("ERROR ERROR! {:?}", e);
             }
         }
     }
 }
 
-async fn _connection_handler(actions:ConnectorActions,
-                             conn:&mut Connector,
-                             receiver:&mut mpsc::Receiver<ConnectorActions>,
-                             w_stream:&mut tcp::OwnedWriteHalf
+async fn _connection_handler(
+    actions: ConnectorActions,
+    conn: &mut Connector,
+    receiver: &mut mpsc::Receiver<ConnectorActions>,
+    w_stream: &mut tcp::OwnedWriteHalf,
 ) -> Result<(), ConnectionError> {
     match actions {
         // start the connection to Stellar node with a 'hello'
@@ -258,22 +259,27 @@ pub(crate) async fn connection_handler(
 ) -> Result<(), ConnectionError> {
     let mut retry = 0;
     loop {
-        match tokio::time::timeout(
-            Duration::from_secs(conn.timeout_in_secs),
-            receiver.recv()
-        ).await {
+        match tokio::time::timeout(Duration::from_secs(conn.timeout_in_secs), receiver.recv()).await
+        {
             Ok(Some(action)) => {
                 retry = 0;
-                _connection_handler(action,&mut conn,&mut receiver,&mut w_stream).await?;
+                _connection_handler(action, &mut conn, &mut receiver, &mut w_stream).await?;
             }
             Ok(None) => {}
             Err(elapsed) => {
-                log::error!("{} for receiving messages. Retry: {}", elapsed.to_string(), retry);
+                log::error!(
+                    "{} for receiving messages. Retry: {}",
+                    elapsed.to_string(),
+                    retry
+                );
                 if retry >= conn.retries {
                     conn.send_to_user(StellarNodeMessage::Timeout).await?;
-                    return Err(ConnectionError::ConnectionFailed(format!("TIMED OUT! elapsed time: {:?}", elapsed.to_string())));
+                    return Err(ConnectionError::ConnectionFailed(format!(
+                        "TIMED OUT! elapsed time: {:?}",
+                        elapsed.to_string()
+                    )));
                 }
-                retry+=1;
+                retry += 1;
             }
         }
     }
