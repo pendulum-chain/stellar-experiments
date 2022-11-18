@@ -1,4 +1,3 @@
-
 use substrate_stellar_sdk::{network::PUBLIC_NETWORK, SecretKey, types::{ScpStatementExternalize, ScpStatementPledges, StellarMessage}};
 use substrate_stellar_sdk::Hash;
 
@@ -27,19 +26,21 @@ async fn stellar_overlay_connect_and_listen_connect_message() {
     let mut tx_set_vec = vec![];
     let mut count_check = 0;
 
+    // We are using a while loop here because we don't know exactly in which order the messages will
+    // arrive and some of the messages are not relevant to us or empty.
     while attempts < max_attempts {
         match overlay_connection.recv().await {
             None => {}
             Some(message) => {
                 match message {
-                    StellarNodeMessage::Connect { pub_key, node_info:y } => {
+                    StellarNodeMessage::Connect { pub_key, node_info: y } => {
                         assert_eq!(y.ledger_version, node_info.ledger_version);
                         count_check = 1;
                     }
                     StellarNodeMessage::Data { p_id, msg_type, msg } => match msg {
                         StellarMessage::ScpMessage(msg) => {
                             received_scp_message = true;
-                            if count_check  == 0 {
+                            if count_check == 0 {
                                 panic!("received a data message before the connect message");
                             }
 
@@ -50,7 +51,7 @@ async fn stellar_overlay_connect_and_listen_connect_message() {
                             }
                         }
                         StellarMessage::TxSet(set) => {
-                            if count_check !=1 {
+                            if count_check != 1 {
                                 panic!("received a TxSetMessage before requesting one.")
                             }
 
@@ -67,6 +68,7 @@ async fn stellar_overlay_connect_and_listen_connect_message() {
         }
         attempts += 1;
     }
+    // We should have received a SCP message and a TxSet message.
     assert_eq!(count_check, 2);
     assert_eq!(received_scp_message, true);
     assert!(tx_set_vec.len() > 0);
