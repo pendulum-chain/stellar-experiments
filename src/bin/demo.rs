@@ -957,10 +957,6 @@ mod test {
         let file_name = TxHashesFileHandler::find_file_by_slot(slot).expect("should return a file");
         assert_eq!(&file_name, "42867135_42867150");
 
-        let slot = 42990037;
-        let file_name =
-            EnvelopesFileHandler::find_file_by_slot(slot).expect("should return a file");
-        assert_eq!(&file_name, "42990036_42990037");
     }
 
     #[test]
