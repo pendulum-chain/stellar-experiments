@@ -127,3 +127,10 @@ Here is an example in the terminal when disconnection/reconnection happens:
 [2022-11-14T18:10:59Z INFO  demo::collector] Inserting received transaction set for slot 43568082
 ```
 ^ The demo is based on  `public` validator: 45.55.99.75
+
+## Test
+
+To run all the tests contained in this project, simply run:
+```
+cargo test
+```
